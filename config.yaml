@@ -1,0 +1,121 @@
+# OmniHunter Configuration
+
+database:
+  path: "data/hunter.db"
+
+platforms:
+  ponisha:
+    enabled: true
+    base_url: "https://ponisha.ir"
+    search_path: "/search/projects"
+    rate_limit_delay_sec: 2.0
+  parscoders:
+    enabled: true
+    base_url: "https://parscoders.com"
+    search_path: "/project"
+    rate_limit_delay_sec: 2.0
+  freelancer:
+    enabled: true
+    base_url: "https://www.freelancer.com"
+    api_url: "https://www.freelancer.com/api/projects/0.1/projects/active"
+    rate_limit_delay_sec: 3.0
+
+scopes:
+  bots:
+    name: "Telegram & Bale Bots"
+    enabled: true
+    min_budget_irt: 1500000
+    min_budget_usd: 20
+    keywords:
+      - "ربات تلگرام"
+      - "تلگرام"
+      - "بله"
+      - "telegram bot"
+      - "bale bot"
+      - "aiogram"
+      - "telethon"
+      - "pyrogram"
+  automation:
+    name: "Process Automation"
+    enabled: true
+    min_budget_irt: 2000000
+    min_budget_usd: 30
+    keywords:
+      - "اتوماسیون"
+      - "n8n"
+      - "وب هوک"
+      - "webhook"
+      - "zapier"
+      - "automation"
+  translation:
+    name: "Specialized & Academic Translation"
+    enabled: true
+    min_budget_irt: 500000
+    min_budget_usd: 10
+    keywords:
+      - "ترجمه مقاله"
+      - "ترجمه تخصصی"
+      - "ترجمه انگلیسی"
+      - "ترجمه متون"
+      - "scientific translation"
+  excel:
+    name: "Excel & Data Cleaning"
+    enabled: true
+    min_budget_irt: 500000
+    min_budget_usd: 10
+    keywords:
+      - "اکسل"
+      - "excel"
+      - "vba"
+      - "ماکرو"
+      - "فرمول نویسی"
+      - "openpyxl"
+      - "pandas"
+  scraping:
+    name: "Web Scraping & Data Extraction"
+    enabled: true
+    min_budget_irt: 1500000
+    min_budget_usd: 20
+    keywords:
+      - "اسکرپ"
+      - "خزنده"
+      - "استخراج داده"
+      - "scraping"
+      - "crawler"
+      - "playwright"
+      - "selenium"
+      - "beautifulsoup"
+  scripting:
+    name: "Python Scripting & APIs"
+    enabled: true
+    min_budget_irt: 2000000
+    min_budget_usd: 30
+    keywords:
+      - "اسکریپت پایتون"
+      - "python script"
+      - "fastapi"
+      - "api"
+      - "requests"
+      - "sqlite"
+  formatting:
+    name: "Document Formatting"
+    enabled: false  # Disabled per specification until format fidelity is improved
+
+scam_filter:
+  blacklist:
+    - "بیعانه"
+    - "پرداخت اول"
+    - "100% upfront"
+    - "تضمین پرداخت"
+    - "شارژ حساب"
+    - "واریز بیعانه"
+    - "کارمزد اولیه"
+
+telegram:
+  bot_token: ""  # Set via TELEGRAM_BOT_TOKEN env var
+  chat_id: ""    # Set via TELEGRAM_CHAT_ID env var
+  notify_tiers:
+    - "A"
+
+reports:
+  directory: "reports"
