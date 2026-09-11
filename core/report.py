@@ -108,7 +108,7 @@ def format_telegram_message(project: dict[str, Any]) -> str:
     raw_url = str(project.get("url") or "").strip()
     if raw_url.startswith(("http://", "https://")):
         safe_url = raw_url.replace(")", "%29").replace("(", "%28")
-        title_block = f"📌 *[{escaped_title}]({safe_url})* ({track_id})"
+        title_block = f"📌 [{escaped_title}]({safe_url}) ({track_id})"
     else:
         title_block = f"📌 *{escaped_title}* ({track_id})"
 
