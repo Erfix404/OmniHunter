@@ -160,6 +160,16 @@ def _parse_budget_val(val: Any) -> float | None:
         return None
 
 
+def _word_matches(needle: str, haystack: str, is_multi: bool) -> bool:
+    if not needle or not haystack:
+        return False
+    if is_multi:
+        return needle in haystack
+    # For single keywords, enforce word boundary to avoid substring collisions (e.g. 'بله' in 'دوبله')
+    pattern = r"(?:\b|^)" + re.escape(needle) + r"(?:\b|$)"
+    return bool(re.search(pattern, haystack, re.IGNORECASE))
+
+
 def _calculate_scope_fit(
     title_norm: str,
     desc_norm: str,
@@ -182,21 +192,21 @@ def _calculate_scope_fit(
             continue
         is_multi = len(kw_norm.split()) >= 2
 
-        if kw_norm in title_norm:
+        if _word_matches(kw_norm, title_norm, is_multi):
             if is_multi:
                 title_score += 0.50
                 has_multi_word_title = True
             else:
                 title_score += 0.35
 
-        if kw_norm in desc_norm:
+        if _word_matches(kw_norm, desc_norm, is_multi):
             if is_multi:
                 desc_score += 0.30
             else:
                 desc_score += 0.20
 
         for skill in skills_norm:
-            if kw_norm in skill:
+            if _word_matches(kw_norm, skill, is_multi):
                 skills_score += 0.25
                 break
 
@@ -249,7 +259,7 @@ def evaluate_project(
 
     # 2. Scam Detection
     custom_blacklist = (
-        cfg.get("scam_filter", {}).get("blacklist") or []
+        (cfg.get("scam_filter") or {}).get("blacklist") or []
     )
     combined_blacklist = list(
         dict.fromkeys(DEFAULT_SCAM_BLACKLIST + custom_blacklist)
