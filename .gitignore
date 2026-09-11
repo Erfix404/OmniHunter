@@ -6,3 +6,5 @@ data/*.db
 data/sessions/
 *.log
 .env
+.coverage
+
