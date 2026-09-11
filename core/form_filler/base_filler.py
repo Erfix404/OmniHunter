@@ -9,6 +9,7 @@ from core.auth_helper import get_session_path, has_session
 
 # ponytail: sequential Playwright page automation over parallel worker pool; upgrade to Playwright BrowserContext pool if processing >5 applications/min.
 # ponytail: CSS selector heuristics over accessibility-tree/AI vision locator; upgrade to visual/AI DOM parser if platforms frequently redesign.
+# ponytail: terminal input inspection prompt over GUI approval popup; upgrade to webhook/dashboard approval if running as background service.
 
 
 class BaseFormFiller:
@@ -34,12 +35,17 @@ class BaseFormFiller:
             raise ValueError(f"Missing required bid parameters: {', '.join(missing)}")
 
     def _fill_first_matching(
-        self, page: Any, selectors: list[str], value: Any, field_name: str
+        self,
+        page: Any,
+        selectors: list[str],
+        value: Any,
+        field_name: str,
+        timeout: int = 2000,
     ) -> None:
         """Try filling each selector in order until one succeeds."""
         for sel in selectors:
             try:
-                page.fill(sel, str(value))
+                page.fill(sel, str(value), timeout=timeout)
                 return
             except Exception:
                 continue
@@ -48,12 +54,16 @@ class BaseFormFiller:
         )
 
     def _click_first_matching(
-        self, page: Any, selectors: list[str], action_name: str
+        self,
+        page: Any,
+        selectors: list[str],
+        action_name: str,
+        timeout: int = 2000,
     ) -> None:
         """Try clicking each selector in order until one succeeds."""
         for sel in selectors:
             try:
-                page.click(sel)
+                page.click(sel, timeout=timeout)
                 return
             except Exception:
                 continue
@@ -75,6 +85,8 @@ class BaseFormFiller:
         session_path: str | Path | None = None,
         dry_run: bool = True,
         headless: bool = False,
+        prompt_fn: Any = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Open project in browser, populate bid parameters, and handle dry-run or submit."""
         result: dict[str, Any] = {
@@ -120,16 +132,48 @@ class BaseFormFiller:
                     result["status"] = "ready"
                     result["submitted"] = False
                     result["details"] = "Form populated in dry-run mode (review in browser; not submitted)"
-                    if not headless:
+                    if not headless or prompt_fn is not None:
+                        msg = "\n[dry-run] Form filled! Inspect the browser window. Press [Enter] to close browser: "
                         try:
-                            page.wait_for_timeout(3000)
-                        except Exception:
+                            if prompt_fn is not None:
+                                try:
+                                    prompt_fn(msg)
+                                except TypeError:
+                                    prompt_fn()
+                            else:
+                                input(msg)
+                        except (EOFError, KeyboardInterrupt):
                             pass
                 else:
-                    self._submit_form(page, project)
-                    result["status"] = "submitted"
-                    result["submitted"] = True
-                    result["details"] = "Application submitted successfully"
+                    cancelled = False
+                    if not headless or prompt_fn is not None:
+                        msg = (
+                            "\n⚠️ Form filled! Inspect the browser window. "
+                            "Press [Enter] to submit, or type 'cancel' to abort: "
+                        )
+                        try:
+                            if prompt_fn is not None:
+                                try:
+                                    ans = str(prompt_fn(msg) or "").strip().lower()
+                                except TypeError:
+                                    ans = str(prompt_fn() or "").strip().lower()
+                            else:
+                                ans = input(msg).strip().lower()
+
+                            if ans in ("cancel", "abort", "n", "no"):
+                                cancelled = True
+                        except (EOFError, KeyboardInterrupt):
+                            cancelled = True
+
+                    if cancelled:
+                        result["status"] = "cancelled"
+                        result["submitted"] = False
+                        result["details"] = "Submission cancelled by user during manual inspection"
+                    else:
+                        self._submit_form(page, project)
+                        result["status"] = "submitted"
+                        result["submitted"] = True
+                        result["details"] = "Application submitted successfully"
 
                 context.close()
                 browser.close()

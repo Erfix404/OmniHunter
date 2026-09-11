@@ -16,6 +16,7 @@ from core.form_filler import (
     BaseFormFiller,
     ParscodersFormFiller,
     PonishaFormFiller,
+    fill_application,
     get_form_filler,
 )
 
@@ -330,8 +331,8 @@ def test_form_filler_selector_fallback_and_exhaustion():
     # First selector fails, second succeeds
     calls = []
 
-    def fake_fill(sel, val):
-        calls.append(sel)
+    def fake_fill(sel, val, **kwargs):
+        calls.append((sel, val, kwargs))
         if len(calls) == 1:
             raise Exception("First selector failed")
         return None
@@ -342,6 +343,9 @@ def test_form_filler_selector_fallback_and_exhaustion():
         mock_page, ['input[name="first"]', 'input[name="second"]'], "test_val", "field"
     )
     assert len(calls) == 2
+    # Verify fast timeout is passed
+    assert calls[0][2].get("timeout") == 2000
+    assert calls[1][2].get("timeout") == 2000
 
     # All selectors fail -> raises RuntimeError
     mock_page.fill.side_effect = Exception("Not found")
@@ -356,8 +360,8 @@ def test_form_filler_click_fallback_and_exhaustion():
     # First click fails, second succeeds
     clicks = []
 
-    def fake_click(sel):
-        clicks.append(sel)
+    def fake_click(sel, **kwargs):
+        clicks.append((sel, kwargs))
         if len(clicks) == 1:
             raise Exception("First click failed")
         return None
@@ -365,6 +369,9 @@ def test_form_filler_click_fallback_and_exhaustion():
     mock_page.click.side_effect = fake_click
     filler._click_first_matching(mock_page, ["btn1", "btn2"], "submit")
     assert len(clicks) == 2
+    # Verify fast timeout is passed
+    assert clicks[0][1].get("timeout") == 2000
+    assert clicks[1][1].get("timeout") == 2000
 
     # All clicks fail -> raises RuntimeError
     mock_page.click.side_effect = Exception("Click error")
@@ -432,4 +439,65 @@ def test_form_filler_auto_detects_default_session(tmp_path: Path):
 
         filler.fill_application(project, headless=True)
         mock_browser.new_context.assert_called_once_with(storage_state=str(mock_sess))
+
+
+def test_top_level_fill_application_wrapper():
+    # Test validation on invalid inputs
+    assert fill_application(None)["status"] == "error"
+    assert fill_application({})["status"] == "error"
+    assert fill_application({"platform": "unknown"})["status"] == "error"
+
+    # Test successful delegation
+    valid_proj = {
+        "platform": "ponisha",
+        "url": "https://ponisha.ir/test",
+        "suggested_bid": 1500000,
+        "delivery_days": 2,
+        "proposal": "Clean proposal",
+    }
+    with patch.object(PonishaFormFiller, "fill_application", return_value={"status": "ready"}) as mock_fill:
+        res = fill_application(valid_proj, dry_run=True)
+        assert res["status"] == "ready"
+        mock_fill.assert_called_once()
+
+
+def test_form_filler_manual_inspection_cancel_and_confirm():
+    filler = PonishaFormFiller()
+    project = {
+        "url": "https://ponisha.ir/test",
+        "suggested_bid": 1500000,
+        "delivery_days": 2,
+        "proposal": "Proposal text",
+    }
+
+    with patch("playwright.sync_api.sync_playwright") as mock_sync_pw:
+        mock_p = mock_sync_pw.return_value.__enter__.return_value
+        mock_browser = MagicMock()
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_p.chromium.launch.return_value = mock_browser
+        mock_browser.new_context.return_value = mock_context
+        mock_context.new_page.return_value = mock_page
+
+        # 1. User cancels during inspection
+        res_cancel = filler.fill_application(
+            project,
+            dry_run=False,
+            headless=False,
+            prompt_fn=lambda msg: "cancel",
+        )
+        assert res_cancel["status"] == "cancelled"
+        assert res_cancel["submitted"] is False
+        assert "cancelled by user" in res_cancel["details"]
+
+        # 2. User confirms submission by pressing enter
+        res_confirm = filler.fill_application(
+            project,
+            dry_run=False,
+            headless=False,
+            prompt_fn=lambda msg: "",
+        )
+        assert res_confirm["status"] == "submitted"
+        assert res_confirm["submitted"] is True
+
 
