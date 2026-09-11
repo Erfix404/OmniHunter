@@ -176,5 +176,12 @@ def poll_updates(
                         "update_id": update_id,
                     }
                 )
+        else:
+            handled_actions.append(
+                {
+                    "action": "ignore",
+                    "update_id": update_id,
+                }
+            )
 
     return handled_actions

@@ -437,7 +437,7 @@ def run_bot(
                 if max_id:
                     offset = max_id + 1
                 all_handled.extend(updates)
-            time.sleep(2)
+            time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nBot polling stopped by user.")
     return all_handled
