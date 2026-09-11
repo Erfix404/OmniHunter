@@ -209,3 +209,56 @@ def test_config_yaml_validity():
     assert "parscoders" in config["platforms"]
     assert "freelancer" in config["platforms"]
 
+
+def test_get_project_and_update_status_boolean_guard(tmp_path):
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    db.save_project({"job_hash": "h_bool", "title": "Boolean Guard Job"})
+    # Boolean True / False must NOT evaluate to int id 1 / 0
+    assert db.get_project(True) is None
+    assert db.get_project(False) is None
+    assert db.update_status(True, "applied") is False
+    assert db.update_status(False, "applied") is False
+
+
+def test_skills_column_serialization(tmp_path):
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    project = {
+        "job_hash": "h_skills",
+        "title": "Skills Job",
+        "skills": ["Python", "FastAPI", "SQLite"],
+    }
+    assert db.save_project(project) is True
+
+    fetched = db.get_project("h_skills")
+    assert fetched is not None
+    assert fetched["skills"] == ["Python", "FastAPI", "SQLite"]
+    assert isinstance(fetched["skills"], list)
+
+
+def test_get_projects_by_date(tmp_path):
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    p1 = {"job_hash": "h_today_1", "title": "Today Project 1"}
+    p2 = {"job_hash": "h_today_2", "title": "Today Project 2"}
+    db.save_project(p1)
+    db.save_project(p2)
+
+    # Defaults to today
+    today_projects = db.get_projects_by_date()
+    assert len(today_projects) == 2
+    assert today_projects[0]["job_hash"] == "h_today_1"
+    assert today_projects[1]["job_hash"] == "h_today_2"
+
+    # Non-matching date returns empty list
+    past_projects = db.get_projects_by_date("2020-01-01")
+    assert past_projects == []
+
+

@@ -35,7 +35,7 @@ def test_escape_telegram_markdown():
     assert "test\\_var" in escaped
     assert "\\*bold\\*" in escaped
     assert "\\`code\\`" in escaped
-    assert "\\[link]" in escaped
+    assert "\\[link\\]" in escaped
     assert "back\\\\slash" in escaped
     assert escape_telegram_markdown(None) == ""
     assert escape_telegram_markdown(123) == "123"
@@ -62,7 +62,7 @@ def test_telegram_message_escaping():
     assert "python\\_telegram\\_bot" in msg
     assert "تست\\_واحد" in msg
     assert "\\`my\\_config\\`" in msg
-    assert "\\[لینک]" in msg
+    assert "\\[لینک\\]" in msg
 
 
 def test_telegram_message_with_and_without_url():
@@ -75,6 +75,16 @@ def test_telegram_message_with_and_without_url():
     }
     msg_url = format_telegram_message(with_url)
     assert "[پروژه با لینک](https://ponisha.ir/project/201?ref=test%281%29)" in msg_url
+
+    bracket_title = {
+        "id": 203,
+        "title": "[فوری] ربات تلگرام",
+        "url": "https://ponisha.ir/project/203",
+        "tier": "A",
+        "scope": "bots",
+    }
+    msg_bracket = format_telegram_message(bracket_title)
+    assert "[\\[فوری\\] ربات تلگرام](https://ponisha.ir/project/203)" in msg_bracket
 
     no_url = {
         "id": 202,

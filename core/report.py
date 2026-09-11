@@ -11,13 +11,13 @@ from typing import Any
 def escape_telegram_markdown(text: Any) -> str:
     """Escape special characters for Telegram legacy Markdown.
 
-    Escapes backslash first, then _, *, `, and [.
+    Escapes backslash first, then _, *, `, [, and ].
     """
     if text is None:
         return ""
     s = str(text)
     s = s.replace("\\", "\\\\")
-    for char in ("_", "*", "`", "["):
+    for char in ("_", "*", "`", "[", "]"):
         s = s.replace(char, f"\\{char}")
     return s
 

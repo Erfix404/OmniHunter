@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -27,6 +28,7 @@ class DB:
         "roadmap",
         "proposal",
         "rejection_reason",
+        "skills",
     }
 
     APPLICATION_COLUMNS = {
@@ -73,6 +75,7 @@ class DB:
                 roadmap TEXT,
                 proposal TEXT,
                 rejection_reason TEXT,
+                skills TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -96,6 +99,11 @@ class DB:
             """
         )
         self.conn.commit()
+        try:
+            self.conn.execute("ALTER TABLE projects ADD COLUMN skills TEXT;")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     def save_project(self, proj_dict: dict[str, Any]) -> bool:
         """Save a new project to the database.
@@ -141,7 +149,9 @@ class DB:
 
     def get_project(self, job_id: int | str) -> dict[str, Any] | None:
         """Retrieve a project by integer ID or string job_hash."""
-        if isinstance(job_id, int):
+        if isinstance(job_id, bool):
+            return None
+        if isinstance(job_id, int) and not isinstance(job_id, bool):
             cursor = self.conn.execute(
                 "SELECT * FROM projects WHERE id = ?", (job_id,)
             )
@@ -184,12 +194,27 @@ class DB:
         cursor = self.conn.execute(query, params)
         return [self._row_to_dict(row) for row in cursor.fetchall()]
 
+    def get_projects_by_date(
+        self, date_str: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Retrieve all projects created on a given date (defaults to today YYYY-MM-DD)."""
+        if date_str is None:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+        date_val = str(date_str).strip()[:10]
+        cursor = self.conn.execute(
+            "SELECT * FROM projects WHERE date(created_at) = ? ORDER BY id ASC",
+            (date_val,),
+        )
+        return [self._row_to_dict(row) for row in cursor.fetchall()]
+
     def update_status(self, job_id: int | str, status: str) -> bool:
         """Update the status of a project.
 
         Returns True if row was updated, False otherwise.
         """
-        if isinstance(job_id, int):
+        if isinstance(job_id, bool):
+            return False
+        if isinstance(job_id, int) and not isinstance(job_id, bool):
             cursor = self.conn.execute(
                 "UPDATE projects SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (status, job_id),
@@ -237,7 +262,7 @@ class DB:
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """Convert a sqlite3.Row to a dictionary, unpacking JSON fields."""
         d = dict(row)
-        for field in ("tech_stack", "roadmap"):
+        for field in ("tech_stack", "roadmap", "skills"):
             val = d.get(field)
             if isinstance(val, str) and val.startswith(("[", "{")):
                 try:
@@ -260,11 +285,16 @@ class DB:
 if __name__ == "__main__":
     with DB(":memory:") as test_db:
         test_db.init_schema()
-        assert test_db.save_project({"job_hash": "test", "title": "Test"}) is True
+        assert test_db.save_project({"job_hash": "test", "title": "Test", "skills": ["Python", "SQLite"]}) is True
         assert test_db.is_seen("test") is True
         assert test_db.save_project({"job_hash": "test", "title": "Test"}) is False
-        assert test_db.get_project("test")["title"] == "Test"
+        proj = test_db.get_project("test")
+        assert proj["title"] == "Test"
+        assert proj["skills"] == ["Python", "SQLite"]
+        assert test_db.get_project(True) is None
+        assert test_db.update_status(False, "evaluated") is False
         assert test_db.update_status("test", "evaluated") is True
         assert test_db.list_projects(status="evaluated")[0]["job_hash"] == "test"
+        assert len(test_db.get_projects_by_date()) == 1
     print("All DB self-checks passed.")
 

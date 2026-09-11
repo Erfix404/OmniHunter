@@ -132,6 +132,35 @@ def test_parscoders_duration_not_captured_as_budget():
     assert res2[0]["budget_max"] == 1000000.0
 
 
+def test_parscoders_word_count_and_description_false_positive_prevention():
+    scraper = ParscodersScraper()
+
+    # Description mentions word count range (۱۰۰۰ تا ۲۰۰۰ کلمه) and budget is negotiable
+    html_word_count = """
+    <div class="project-card">
+        <a href="/project/503/translation">ترجمه مقاله تخصصی هوش مصنوعی</a>
+        <div class="project-budget">قیمت توافقی</div>
+        <p class="description">نیاز به ترجمه تخصصی حدود ۱۰۰۰ تا ۲۰۰۰ کلمه مقاله انگلیسی در حوزه یادگیری ماشین.</p>
+    </div>
+    """
+    res = scraper.parse_html(html_word_count)
+    assert len(res) == 1
+    assert res[0]["budget_min"] is None
+    assert res[0]["budget_max"] is None
+
+    # Description mentions word count range and no budget section exists
+    html_no_budget_sec = """
+    <div class="project-card">
+        <a href="/project/504/writing">تولید محتوا</a>
+        <p class="description">نگارش ۱۰۰۰ تا ۲۰۰۰ کلمه متن تخصصی.</p>
+    </div>
+    """
+    res2 = scraper.parse_html(html_no_budget_sec)
+    assert len(res2) == 1
+    assert res2[0]["budget_min"] is None
+    assert res2[0]["budget_max"] is None
+
+
 def test_freelancer_api_parser():
     scraper = FreelancerScraper()
     mock_api_payload = {

@@ -209,93 +209,104 @@ def run_scan(
 ) -> list[dict[str, Any]]:
     """Execute end-to-end scanning pipeline."""
     cfg = config if config is not None else _load_config()
+    owns_db = False
 
     if db is None:
         db_path = cfg.get("database", {}).get("path", "data/hunter.db")
         db = DB(db_path)
         db.init_schema()
+        owns_db = True
 
-    raw_projects: list[dict[str, Any]] = []
-
-    if getattr(args, "mock", False):
-        raw_projects = [dict(p) for p in MOCK_PROJECTS]
-    else:
-        target_platform = getattr(args, "platform", None)
-        plat_cfgs = cfg.get("platforms", {})
-
-        scrapers_to_run: list[Any] = []
-        if target_platform:
-            platforms = [target_platform.lower()]
-        else:
-            platforms = [p for p, pcfg in plat_cfgs.items() if pcfg.get("enabled", True)]
-            if not platforms:
-                platforms = ["ponisha", "parscoders", "freelancer"]
-
-        for plat in platforms:
-            delay = plat_cfgs.get(plat, {}).get("rate_limit_delay_sec", 2.0)
-            if plat == "ponisha":
-                scrapers_to_run.append(PonishaScraper(rate_limit_delay_sec=delay))
-            elif plat == "parscoders":
-                scrapers_to_run.append(ParscodersScraper(rate_limit_delay_sec=delay))
-            elif plat == "freelancer":
-                scrapers_to_run.append(FreelancerScraper(rate_limit_delay_sec=delay))
-
-        for scraper in scrapers_to_run:
-            try:
-                fetched = scraper.fetch_projects()
-                raw_projects.extend(fetched)
-            except Exception as e:
-                logger.error(f"Scraper error: {e}")
-
-    # Deduplicate via DB is_seen
-    unseen_projects: list[dict[str, Any]] = []
-    for p in raw_projects:
-        j_hash = p.get("job_hash", "")
-        if j_hash and not db.is_seen(j_hash):
-            unseen_projects.append(p)
-
-    processed_projects: list[dict[str, Any]] = []
-
-    # Triage and Architect
-    for p in unseen_projects:
-        triage_info = evaluate_project(p, config=cfg)
-        p.update(triage_info)
-
-        if not p.get("is_scam") and p.get("tier") in ("A", "B"):
-            arch_info = generate_architecture(p, config=cfg)
-            p.update(arch_info)
-
-        if not getattr(args, "dry_run", False):
-            db.save_project(p)
-            saved = db.get_project(p.get("job_hash", ""))
-            if saved:
-                p["id"] = saved.get("id")
-
-        processed_projects.append(p)
-
-    # Markdown daily report
-    reports_dir = cfg.get("reports", {}).get("directory", "reports")
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    report_file = f"{reports_dir}/{today_str}.md"
     try:
-        build_markdown_report(processed_projects, output_path=report_file)
-    except Exception as e:
-        logger.warning(f"Could not write daily report: {e}")
+        raw_projects: list[dict[str, Any]] = []
 
-    # Telegram notification
-    if getattr(args, "notify", False) and not getattr(args, "dry_run", False):
-        tg_cfg = cfg.get("telegram", {})
-        token = os.getenv("TELEGRAM_BOT_TOKEN") or tg_cfg.get("bot_token")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID") or tg_cfg.get("chat_id")
-        notify_tiers = tg_cfg.get("notify_tiers", ["A"])
+        if getattr(args, "mock", False):
+            raw_projects = [dict(p) for p in MOCK_PROJECTS]
+        else:
+            target_platform = getattr(args, "platform", None)
+            plat_cfgs = cfg.get("platforms", {})
 
-        if token and chat_id:
-            for p in processed_projects:
-                if p.get("tier") in notify_tiers and not p.get("is_scam"):
-                    send_project_alert(p, token=token, chat_id=chat_id)
+            scrapers_to_run: list[Any] = []
+            if target_platform:
+                platforms = [target_platform.lower()]
+            else:
+                platforms = [p for p, pcfg in plat_cfgs.items() if pcfg.get("enabled", True)]
+                if not platforms:
+                    platforms = ["ponisha", "parscoders", "freelancer"]
 
-    print(f"Scan complete: {len(processed_projects)} new projects processed.")
-    return processed_projects
+            for plat in platforms:
+                delay = plat_cfgs.get(plat, {}).get("rate_limit_delay_sec", 2.0)
+                if plat == "ponisha":
+                    scrapers_to_run.append(PonishaScraper(rate_limit_delay_sec=delay))
+                elif plat == "parscoders":
+                    scrapers_to_run.append(ParscodersScraper(rate_limit_delay_sec=delay))
+                elif plat == "freelancer":
+                    scrapers_to_run.append(FreelancerScraper(rate_limit_delay_sec=delay))
+
+            for scraper in scrapers_to_run:
+                try:
+                    fetched = scraper.fetch_projects()
+                    raw_projects.extend(fetched)
+                except Exception as e:
+                    logger.error(f"Scraper error: {e}")
+
+        # Deduplicate via DB is_seen
+        unseen_projects: list[dict[str, Any]] = []
+        for p in raw_projects:
+            j_hash = p.get("job_hash", "")
+            if j_hash and not db.is_seen(j_hash):
+                unseen_projects.append(p)
+
+        processed_projects: list[dict[str, Any]] = []
+
+        # Triage and Architect
+        for p in unseen_projects:
+            triage_info = evaluate_project(p, config=cfg)
+            p.update(triage_info)
+
+            if not p.get("is_scam") and p.get("tier") in ("A", "B"):
+                arch_info = generate_architecture(p, config=cfg)
+                p.update(arch_info)
+
+            if not getattr(args, "dry_run", False):
+                db.save_project(p)
+                saved = db.get_project(p.get("job_hash", ""))
+                if saved:
+                    p["id"] = saved.get("id")
+
+            processed_projects.append(p)
+
+        # Markdown daily report
+        reports_dir = cfg.get("reports", {}).get("directory", "reports")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        report_file = f"{reports_dir}/{today_str}.md"
+        try:
+            report_projects = processed_projects
+            if not getattr(args, "dry_run", False) and db is not None:
+                saved_today = db.get_projects_by_date(today_str)
+                if saved_today:
+                    report_projects = saved_today
+            build_markdown_report(report_projects, output_path=report_file)
+        except Exception as e:
+            logger.warning(f"Could not write daily report: {e}")
+
+        # Telegram notification
+        if getattr(args, "notify", False) and not getattr(args, "dry_run", False):
+            tg_cfg = cfg.get("telegram", {})
+            token = os.getenv("TELEGRAM_BOT_TOKEN") or tg_cfg.get("bot_token")
+            chat_id = os.getenv("TELEGRAM_CHAT_ID") or tg_cfg.get("chat_id")
+            notify_tiers = tg_cfg.get("notify_tiers", ["A"])
+
+            if token and chat_id:
+                for p in processed_projects:
+                    if p.get("tier") in notify_tiers and not p.get("is_scam"):
+                        send_project_alert(p, token=token, chat_id=chat_id)
+
+        print(f"Scan complete: {len(processed_projects)} new projects processed.")
+        return processed_projects
+    finally:
+        if owns_db and db is not None:
+            db.close()
 
 
 def run_list(
@@ -303,43 +314,49 @@ def run_list(
     db: DB | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch and display projects from database."""
+    owns_db = False
     if db is None:
         cfg = _load_config()
         db_path = cfg.get("database", {}).get("path", "data/hunter.db")
         db = DB(db_path)
         db.init_schema()
+        owns_db = True
 
-    tier = getattr(args, "tier", None)
-    if tier:
-        tier = tier.upper()
-    status = getattr(args, "status", None)
-    limit = getattr(args, "limit", None)
+    try:
+        tier = getattr(args, "tier", None)
+        if tier:
+            tier = tier.upper()
+        status = getattr(args, "status", None)
+        limit = getattr(args, "limit", None)
 
-    projects = db.list_projects(tier=tier, status=status)
-    if limit and limit > 0:
-        projects = projects[:limit]
+        projects = db.list_projects(tier=tier, status=status)
+        if limit and limit > 0:
+            projects = projects[:limit]
 
-    print(f"\n--- Stored Projects ({len(projects)}) ---")
-    if not projects:
-        print("No projects found matching criteria.")
-        return []
+        print(f"\n--- Stored Projects ({len(projects)}) ---")
+        if not projects:
+            print("No projects found matching criteria.")
+            return []
 
-    print(
-        f"{'ID':<6} | {'Tier':<4} | {'Platform':<11} | {'Status':<9} | {'Scope':<12} | {'Title'}"
-    )
-    print("-" * 75)
-    for p in projects:
-        p_id = str(p.get("id") or "-")
-        p_tier = str(p.get("tier") or "-")
-        p_plat = str(p.get("platform") or "-")
-        p_stat = str(p.get("status") or "-")
-        p_scope = str(p.get("scope") or "-")
-        p_title = str(p.get("title") or "")[:35]
         print(
-            f"{p_id:<6} | {p_tier:<4} | {p_plat:<11} | {p_stat:<9} | {p_scope:<12} | {p_title}"
+            f"{'ID':<6} | {'Tier':<4} | {'Platform':<11} | {'Status':<9} | {'Scope':<12} | {'Title'}"
         )
+        print("-" * 75)
+        for p in projects:
+            p_id = str(p.get("id") or "-")
+            p_tier = str(p.get("tier") or "-")
+            p_plat = str(p.get("platform") or "-")
+            p_stat = str(p.get("status") or "-")
+            p_scope = str(p.get("scope") or "-")
+            p_title = str(p.get("title") or "")[:35]
+            print(
+                f"{p_id:<6} | {p_tier:<4} | {p_plat:<11} | {p_stat:<9} | {p_scope:<12} | {p_title}"
+            )
 
-    return projects
+        return projects
+    finally:
+        if owns_db and db is not None:
+            db.close()
 
 
 def run_apply(
@@ -347,46 +364,52 @@ def run_apply(
     db: DB | None = None,
 ) -> dict[str, Any]:
     """Retrieve project and populate application form with Playwright."""
+    owns_db = False
     if db is None:
         cfg = _load_config()
         db_path = cfg.get("database", {}).get("path", "data/hunter.db")
         db = DB(db_path)
         db.init_schema()
+        owns_db = True
 
-    job_id = args.job_id
-    project = db.get_project(job_id)
-    if not project:
-        print(f"Error: Project '{job_id}' not found in database.")
-        return {"status": "error", "message": f"Project '{job_id}' not found"}
+    try:
+        job_id = args.job_id
+        project = db.get_project(job_id)
+        if not project:
+            print(f"Error: Project '{job_id}' not found in database.")
+            return {"status": "error", "message": f"Project '{job_id}' not found"}
 
-    dry_run = getattr(args, "dry_run", True)
-    headless = getattr(args, "headless", False)
+        dry_run = getattr(args, "dry_run", True)
+        headless = getattr(args, "headless", False)
 
-    print(
-        f"Applying to project #{project.get('id')} [{project.get('platform')}]: {project.get('title')}"
-    )
-    print(f"Mode: {'DRY RUN (preview only)' if dry_run else 'SUBMIT (live submission)'}")
-
-    res = fill_application(project, dry_run=dry_run, headless=headless)
-
-    if not dry_run and (res.get("submitted") or res.get("status") == "success"):
-        db.update_status(project["id"], "applied")
-        db.save_application(
-            {
-                "project_id": project["id"],
-                "bid_amount": project.get("suggested_bid"),
-                "delivery_days": project.get("delivery_days"),
-                "proposal_text": project.get("proposal"),
-                "status": "submitted",
-            }
+        print(
+            f"Applying to project #{project.get('id')} [{project.get('platform')}]: {project.get('title')}"
         )
-        print("Application submitted and recorded in database.")
-    elif res.get("status") == "success":
-        print("Form filled successfully in preview mode (dry-run).")
-    else:
-        print(f"Form filler result: {res.get('status')} - {res.get('details')}")
+        print(f"Mode: {'DRY RUN (preview only)' if dry_run else 'SUBMIT (live submission)'}")
 
-    return res
+        res = fill_application(project, dry_run=dry_run, headless=headless)
+
+        if not dry_run and (res.get("submitted") or res.get("status") == "success"):
+            db.update_status(project["id"], "applied")
+            db.save_application(
+                {
+                    "project_id": project["id"],
+                    "bid_amount": project.get("suggested_bid"),
+                    "delivery_days": project.get("delivery_days"),
+                    "proposal_text": project.get("proposal"),
+                    "status": "submitted",
+                }
+            )
+            print("Application submitted and recorded in database.")
+        elif res.get("status") == "success":
+            print("Form filled successfully in preview mode (dry-run).")
+        else:
+            print(f"Form filler result: {res.get('status')} - {res.get('details')}")
+
+        return res
+    finally:
+        if owns_db and db is not None:
+            db.close()
 
 
 def run_auth(args: argparse.Namespace) -> Any:
@@ -405,42 +428,48 @@ def run_bot(
     db: DB | None = None,
 ) -> list[dict[str, Any]]:
     """Run Telegram bot interaction listener."""
+    owns_db = False
     cfg = config if config is not None else _load_config()
     if db is None:
         db_path = cfg.get("database", {}).get("path", "data/hunter.db")
         db = DB(db_path)
         db.init_schema()
+        owns_db = True
 
-    token = os.getenv("TELEGRAM_BOT_TOKEN") or cfg.get("telegram", {}).get("bot_token")
-    if not token:
-        print("Error: TELEGRAM_BOT_TOKEN not configured in environment or config.yaml")
-        return []
-
-    once = getattr(args, "once", False)
-    if once:
-        print("Polling Telegram bot updates once...")
-        handled = poll_updates(token=token, db=db, limit=10)
-        print(f"Completed poll. Handled {len(handled)} updates.")
-        return handled
-
-    print("Starting Telegram bot polling loop. Press Ctrl+C to exit...")
-    offset = None
-    all_handled: list[dict[str, Any]] = []
     try:
-        while True:
-            updates = poll_updates(token=token, db=db, offset=offset, limit=10, timeout=5)
-            if updates:
-                max_id = max(
-                    (u.get("update_id", 0) for u in updates if u.get("update_id")),
-                    default=0,
-                )
-                if max_id:
-                    offset = max_id + 1
-                all_handled.extend(updates)
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        print("\nBot polling stopped by user.")
-    return all_handled
+        token = os.getenv("TELEGRAM_BOT_TOKEN") or cfg.get("telegram", {}).get("bot_token")
+        if not token:
+            print("Error: TELEGRAM_BOT_TOKEN not configured in environment or config.yaml")
+            return []
+
+        once = getattr(args, "once", False)
+        if once:
+            print("Polling Telegram bot updates once...")
+            handled = poll_updates(token=token, db=db, limit=10)
+            print(f"Completed poll. Handled {len(handled)} updates.")
+            return handled
+
+        print("Starting Telegram bot polling loop. Press Ctrl+C to exit...")
+        offset = None
+        all_handled: list[dict[str, Any]] = []
+        try:
+            while True:
+                updates = poll_updates(token=token, db=db, offset=offset, limit=10, timeout=5)
+                if updates:
+                    max_id = max(
+                        (u.get("update_id", 0) for u in updates if u.get("update_id")),
+                        default=0,
+                    )
+                    if max_id:
+                        offset = max_id + 1
+                    all_handled.extend(updates)
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\nBot polling stopped by user.")
+        return all_handled
+    finally:
+        if owns_db and db is not None:
+            db.close()
 
 
 def main(argv: list[str] | None = None) -> int:

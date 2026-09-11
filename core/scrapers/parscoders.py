@@ -1,6 +1,12 @@
+from pathlib import Path
 import re
+import sys
 from typing import Any
 from urllib.parse import urljoin
+
+if str(Path(__file__).resolve().parent.parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 from core.scrapers.base import BaseScraper
 
 
@@ -132,8 +138,41 @@ class ParscodersScraper(BaseScraper):
             skills=skills,
         )
 
-    def _parse_budget(self, text: str) -> tuple[float | None, float | None]:
-        """Extract min and max budget from Persian/Arabic/English text."""
+    def _parse_budget(self, chunk: str) -> tuple[float | None, float | None]:
+        """Extract min and max budget from Persian/Arabic/English text, prioritizing budget sections."""
+        if not chunk:
+            return None, None
+
+        # 1. Search for budget-specific DOM tags or labels first
+        # Look for elements with budget/price in class attribute
+        budget_block_match = re.search(
+            r'<(?:div|span|p|li|td)\b[^>]*class=["\'][^"\']*(?:budget|price)[^"\']*["\'][^>]*>(.*?)</(?:div|span|p|li|td)>',
+            chunk,
+            re.DOTALL | re.IGNORECASE,
+        )
+        # Look for labeled text containing بودجه, قیمت, مبلغ, budget, price
+        budget_label_match = re.search(
+            r'(?:بودجه|قیمت|مبلغ|هزینه|budget|price)\s*[:：]?[^<\n]*(?:<[^>]+>[^<\n]*)*(?:تومان|ریال|توافقی|\b[\d۰-۹]+[\d۰-۹\s,،٬\-تاالی]+)',
+            chunk,
+            re.IGNORECASE,
+        )
+
+        candidate: str | None = None
+        if budget_block_match:
+            candidate = budget_block_match.group(1)
+        elif budget_label_match:
+            candidate = budget_label_match.group(0)
+
+        if candidate is not None:
+            return self._extract_budget_values(candidate, is_dedicated_section=True)
+
+        # 2. Fallback: parse entire chunk without greedy match over word counts / durations
+        return self._extract_budget_values(chunk, is_dedicated_section=False)
+
+    def _extract_budget_values(
+        self, text: str, is_dedicated_section: bool = False
+    ) -> tuple[float | None, float | None]:
+        """Extract budget numbers from normalized text, ignoring word counts and durations."""
         if not text:
             return None, None
 
@@ -141,43 +180,44 @@ class ParscodersScraper(BaseScraper):
         clean = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
         clean = re.sub(r'[,،٬]', '', clean)
 
-        # Check for range: num تا num or num - num (require >=4 digits to exclude durations like "5 تا 7 روز")
-        range_match = re.search(r'\b(\d{4,})\s*(?:تا|الی|-)\s*(\d{4,})\b', clean)
-        if range_match:
-            return float(range_match.group(1)), float(range_match.group(2))
+        if "توافقی" in clean:
+            return None, None
+
+        # Negative lookahead: do NOT match if followed by word-count or duration units
+        unit_reject = r'(?!\s*(?:کلمه|واژه|صفحه|روز|ساعت|ماه|سال|هفته|کاربر|مورد|عدد))'
 
         # Check for less than / max budget
         if "کمتر از" in clean or "حداکثر" in clean:
             after = clean.split("کمتر از")[-1] if "کمتر از" in clean else clean.split("حداکثر")[-1]
-            nums = re.findall(r'\b\d{4,}\b', after)
+            nums = re.findall(r'\b(\d{4,})\b' + unit_reject, after)
             if nums:
                 return None, float(nums[0])
 
         # Check for more than / min budget
         if "بیشتر از" in clean or "حداقل" in clean:
             after = clean.split("بیشتر از")[-1] if "بیشتر از" in clean else clean.split("حداقل")[-1]
-            nums = re.findall(r'\b\d{4,}\b', after)
+            nums = re.findall(r'\b(\d{4,})\b' + unit_reject, after)
             if nums:
                 return float(nums[0]), None
 
-        # Check if "بودجه" section or class exists
-        budget_section = re.search(
-            r'(?:class=[\"\']?[^\">]*budget[^\">]*[\"\']?>|بودجه|هزینه|مبلغ).*?(?:</|تومان|ریال|$)',
-            clean,
-            re.IGNORECASE,
-        )
-        if budget_section:
-            nums = re.findall(r'\b\d{4,}\b', budget_section.group(0))
-            if len(nums) >= 2:
-                return float(nums[0]), float(nums[1])
-            elif len(nums) == 1:
-                return float(nums[0]), float(nums[0])
+        # Check for range: num تا num or num - num (>= 4 digits and not followed by non-budget unit)
+        range_match = re.search(r'\b(\d{4,})\s*(?:تا|الی|-)\s*(\d{4,})\b' + unit_reject, clean)
+        if range_match:
+            return float(range_match.group(1)), float(range_match.group(2))
 
         # Match single price followed by currency
         single_currency = re.search(r'\b(\d{4,})\s*(?:تومان|ریال)', clean)
         if single_currency:
             val = float(single_currency.group(1))
             return val, val
+
+        # If we are inside an explicit budget block/label, check for lone numbers
+        if is_dedicated_section:
+            nums = re.findall(r'\b(\d{4,})\b' + unit_reject, clean)
+            if len(nums) >= 2:
+                return float(nums[0]), float(nums[1])
+            elif len(nums) == 1:
+                return float(nums[0]), float(nums[0])
 
         return None, None
 

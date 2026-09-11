@@ -290,3 +290,55 @@ def test_architect_llm_success_openai(monkeypatch):
         arch = generate_architecture(proj)
         assert "تولید شده توسط اوپن ای‌آی" in arch["proposal"]
 
+
+def test_architect_llm_cliche_stripping(monkeypatch):
+    import io
+    import json
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-valid")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    # First sentence has banned cliche, second sentence has clean technical proposal
+    raw_llm = (
+        "سلام و احترام، امیدوارم حالتون خوب باشه.\n"
+        "برای پیاده‌سازی این پروژه، ساختاری ماژولار با فریم‌ورک غیرهمگام aiogram و پایتون استاندارد "
+        "طراحی شده و با بالاترین کیفیت و قابلیت تست‌پذیری در زمان مقرر تحویل داده خواهد شد."
+    )
+    fake_resp = io.BytesIO(
+        json.dumps({
+            "content": [{"text": raw_llm}]
+        }).encode("utf-8")
+    )
+
+    with patch("urllib.request.urlopen", return_value=fake_resp):
+        proj = {"title": "ربات تلگرام", "scope": "bots"}
+        arch = generate_architecture(proj)
+        # Cliche should be stripped
+        assert "امیدوارم حالتون خوب باشه" not in arch["proposal"]
+        # Valid content retained
+        assert "ساختاری ماژولار" in arch["proposal"]
+
+
+def test_architect_llm_cliche_complete_fallback(monkeypatch):
+    import io
+    import json
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-valid")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    # Entire LLM response is just banned cliches -> should fall back to rule-based proposal
+    raw_llm = "سلام و احترام، امیدوارم حالتون خوب باشه. من یک برنامه نویس با تجربه هستم."
+    fake_resp = io.BytesIO(
+        json.dumps({
+            "content": [{"text": raw_llm}]
+        }).encode("utf-8")
+    )
+
+    with patch("urllib.request.urlopen", return_value=fake_resp):
+        proj = {"title": "ربات تلگرام", "scope": "bots"}
+        arch = generate_architecture(proj)
+        assert "امیدوارم حالتون خوب باشه" not in arch["proposal"]
+        # Fallback to rule-based template
+        assert "aiogram" in arch["proposal"] or "پایتون" in arch["proposal"]
+
+

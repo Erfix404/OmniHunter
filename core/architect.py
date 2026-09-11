@@ -282,6 +282,40 @@ def _build_rule_based_proposal(
     return proposal.strip()
 
 
+def _clean_llm_proposal(text: str) -> str | None:
+    """Filter LLM proposal text, stripping sentences with banned cliches or returning None."""
+    if not text:
+        return None
+
+    # Check if any cliche is present
+    has_cliche = any(cliche.lower() in text.lower() for cliche in BANNED_CLICHES)
+    if not has_cliche:
+        clean = text.strip()
+        return clean if len(clean) > 50 else None
+
+    # Split into lines and sentences to strip the cliche sentences
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        if not any(cliche.lower() in line.lower() for cliche in BANNED_CLICHES):
+            cleaned_lines.append(line)
+        else:
+            sentences = re.split(r'(?<=[.!؟?\n])\s+', line)
+            kept = [
+                s.strip()
+                for s in sentences
+                if s.strip() and not any(cliche.lower() in s.lower() for cliche in BANNED_CLICHES)
+            ]
+            if kept:
+                cleaned_lines.append(" ".join(kept))
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    if any(cliche.lower() in cleaned.lower() for cliche in BANNED_CLICHES):
+        return None
+    if len(cleaned) < 50:
+        return None
+    return cleaned
+
+
 def _query_llm_proposal(
     project: dict[str, Any],
     scope: str,
@@ -334,9 +368,10 @@ def _query_llm_proposal(
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("content", [])
                 if content and isinstance(content, list):
-                    text = content[0].get("text", "").strip()
-                    if text and len(text) > 50:
-                        return text
+                    raw_text = content[0].get("text", "")
+                    cleaned = _clean_llm_proposal(raw_text)
+                    if cleaned:
+                        return cleaned
         except Exception:
             pass
 
@@ -361,9 +396,10 @@ def _query_llm_proposal(
                 data = json.loads(resp.read().decode("utf-8"))
                 choices = data.get("choices", [])
                 if choices and isinstance(choices, list):
-                    text = choices[0].get("message", {}).get("content", "").strip()
-                    if text and len(text) > 50:
-                        return text
+                    raw_text = choices[0].get("message", {}).get("content", "")
+                    cleaned = _clean_llm_proposal(raw_text)
+                    if cleaned:
+                        return cleaned
         except Exception:
             pass
 

@@ -444,3 +444,50 @@ def test_telegram_bot_poll_updates(tmp_path):
     # Network error handling
     with patch("requests.get", side_effect=Exception("Telegram unreachable")):
         assert poll_updates("valid_token", db=db) == []
+
+
+def test_daily_report_aggregates_across_multiple_scans(tmp_path):
+    from datetime import datetime
+
+    db_file = tmp_path / "multi_scan.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    reports_dir = tmp_path / "reports"
+    cfg = {
+        "database": {"path": str(db_file)},
+        "reports": {"directory": str(reports_dir)},
+    }
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    report_path = reports_dir / f"{today_str}.md"
+
+    args = Namespace(command="scan", mock=True, dry_run=False, notify=False, platform=None)
+
+    # First scan: processes 4 projects and creates report
+    run_scan(args, config=cfg, db=db)
+    assert report_path.exists()
+    content_first = report_path.read_text(encoding="utf-8")
+    assert "مجموع کل پروژه‌های اسکن‌شده | **4**" in content_first
+
+    # Second scan: 0 new projects, but report aggregates all saved projects from today
+    second_res = run_scan(args, config=cfg, db=db)
+    assert len(second_res) == 0
+    content_second = report_path.read_text(encoding="utf-8")
+    assert "مجموع کل پروژه‌های اسکن‌شده | **4**" in content_second
+
+
+def test_cli_owns_db_clean_closure(tmp_path):
+    db_file = tmp_path / "closure_hunter.db"
+    cfg = {"database": {"path": str(db_file)}, "reports": {"directory": str(tmp_path / "reports")}}
+
+    args_scan = Namespace(command="scan", mock=True, dry_run=True, notify=False, platform=None)
+    with patch("interfaces.cli.DB.close") as mock_close:
+        run_scan(args_scan, config=cfg, db=None)
+        mock_close.assert_called_once()
+
+    args_list = Namespace(tier=None, status=None, limit=None)
+    with patch("interfaces.cli.DB.close") as mock_close, \
+         patch("interfaces.cli._load_config", return_value=cfg):
+        run_list(args_list, db=None)
+        mock_close.assert_called_once()
+
