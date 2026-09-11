@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 data/*.db
 data/sessions/
+reports/*.md
+!reports/.gitkeep
 *.log
 .env
 .coverage
