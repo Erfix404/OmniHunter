@@ -99,6 +99,39 @@ def test_parscoders_budget_edge_cases():
     assert res3[0]["budget_max"] is None
 
 
+def test_parscoders_duration_not_captured_as_budget():
+    scraper = ParscodersScraper()
+
+    # Duration only ("مهلت ۵ تا ۷ روز") with negotiable price: must NOT extract duration as budget
+    html_duration_only = """
+    <div class="project-card">
+        <a href="/project/501/bot">طراحی ربات تلگرام</a>
+        <div class="deadline">مهلت ۵ تا ۷ روز</div>
+        <div class="project-budget">قیمت توافقی</div>
+        <p>توضیحات پروژه</p>
+    </div>
+    """
+    res1 = scraper.parse_html(html_duration_only)
+    assert len(res1) == 1
+    assert res1[0]["budget_min"] is None
+    assert res1[0]["budget_max"] is None
+
+    # Both duration ("مهلت ۵ تا ۷ روز") and valid budget ("۵۰۰,۰۰۰ تا ۱,۰۰۰,۰۰۰ تومان")
+    html_with_budget = """
+    <div class="project-card">
+        <a href="/project/502/scraper">اسکریپت پایتون</a>
+        <div class="deadline">مهلت ۵ تا ۷ روز</div>
+        <div class="project-budget">بودجه: ۵۰۰,۰۰۰ تا ۱,۰۰۰,۰۰۰ تومان</div>
+        <div class="project-tags"><span class="tag">پایتون</span></div>
+        <p>توضیحات پروژه</p>
+    </div>
+    """
+    res2 = scraper.parse_html(html_with_budget)
+    assert len(res2) == 1
+    assert res2[0]["budget_min"] == 500000.0
+    assert res2[0]["budget_max"] == 1000000.0
+
+
 def test_freelancer_api_parser():
     scraper = FreelancerScraper()
     mock_api_payload = {

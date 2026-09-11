@@ -39,7 +39,7 @@ class ParscodersScraper(BaseScraper):
         """Split HTML into per-project blocks or fallback to link contexts."""
         card_matches = list(
             re.finditer(
-                r'<(?:div|article|li)\s+class="[^"]*(?:project-card|project-item|project-row|project)[^"]*"[^>]*>',
+                r'<(?:div|article|li)\b[^>]*class=["\'][^"\']*\b(?:project-card|project-item|project-row)\b[^"\']*["\'][^>]*>',
                 html,
                 re.IGNORECASE,
             )
@@ -141,34 +141,43 @@ class ParscodersScraper(BaseScraper):
         clean = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
         clean = re.sub(r'[,،٬]', '', clean)
 
+        # Check for range: num تا num or num - num (require >=4 digits to exclude durations like "5 تا 7 روز")
+        range_match = re.search(r'\b(\d{4,})\s*(?:تا|الی|-)\s*(\d{4,})\b', clean)
+        if range_match:
+            return float(range_match.group(1)), float(range_match.group(2))
+
         # Check for less than / max budget
         if "کمتر از" in clean or "حداکثر" in clean:
             after = clean.split("کمتر از")[-1] if "کمتر از" in clean else clean.split("حداکثر")[-1]
-            nums = re.findall(r'\b\d+\b', after)
+            nums = re.findall(r'\b\d{4,}\b', after)
             if nums:
                 return None, float(nums[0])
 
         # Check for more than / min budget
         if "بیشتر از" in clean or "حداقل" in clean:
             after = clean.split("بیشتر از")[-1] if "بیشتر از" in clean else clean.split("حداقل")[-1]
-            nums = re.findall(r'\b\d+\b', after)
+            nums = re.findall(r'\b\d{4,}\b', after)
             if nums:
                 return float(nums[0]), None
 
-        # Check for range: num تا num or num - num
-        range_match = re.search(r'(\d+)\s*(?:تا|الی|-)\s*(\d+)', clean)
-        if range_match:
-            return float(range_match.group(1)), float(range_match.group(2))
+        # Check if "بودجه" section or class exists
+        budget_section = re.search(
+            r'(?:class=[\"\']?[^\">]*budget[^\">]*[\"\']?>|بودجه|هزینه|مبلغ).*?(?:</|تومان|ریال|$)',
+            clean,
+            re.IGNORECASE,
+        )
+        if budget_section:
+            nums = re.findall(r'\b\d{4,}\b', budget_section.group(0))
+            if len(nums) >= 2:
+                return float(nums[0]), float(nums[1])
+            elif len(nums) == 1:
+                return float(nums[0]), float(nums[0])
 
-        # Check if "بودجه" section exists
-        budget_section = re.search(r'بودجه.*?(?:تومان|ریال|$)', clean, re.IGNORECASE)
-        target = budget_section.group(0) if budget_section else clean
-
-        nums = re.findall(r'\b\d{4,}\b', target)  # Filter numbers with at least 4 digits (prices)
-        if len(nums) >= 2:
-            return float(nums[0]), float(nums[1])
-        elif len(nums) == 1:
-            return float(nums[0]), float(nums[0])
+        # Match single price followed by currency
+        single_currency = re.search(r'\b(\d{4,})\s*(?:تومان|ریال)', clean)
+        if single_currency:
+            val = float(single_currency.group(1))
+            return val, val
 
         return None, None
 
