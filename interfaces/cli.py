@@ -598,6 +598,8 @@ def run_browser(args: argparse.Namespace) -> None:
             print(f"Approval Mode Active. Listening on port: {port_info[0]}")
         else:
             print("Approval Mode NOT Active. No DevToolsActivePort found.")
+    else:
+        print("Please specify --list or --status")
 
 
 def main(argv: list[str] | None = None) -> int:

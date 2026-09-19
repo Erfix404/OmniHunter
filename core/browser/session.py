@@ -16,17 +16,21 @@ class SessionManager:
         self._page = None
 
     def __enter__(self) -> Any:
+        if self.mode != "live":
+            raise NotImplementedError("Isolated mode pending")
+
         self._pw_context = sync_playwright()
         self._playwright = self._pw_context.__enter__()
 
-        if self.mode == "live":
+        try:
             self._browser = connect_live(self._playwright, timeout=self.timeout)
             contexts = self._browser.contexts
             ctx = contexts[0] if contexts else self._browser.new_context()
             self._page = ctx.new_page()
             return self._page
-        else:
-            raise NotImplementedError("Isolated mode pending")
+        except Exception:
+            self._pw_context.__exit__(None, None, None)
+            raise
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self._page:
