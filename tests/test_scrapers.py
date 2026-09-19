@@ -2,7 +2,7 @@ import time
 from unittest.mock import MagicMock, patch
 import pytest
 
-from core.scrapers.base import BaseScraper
+from core.scrapers.base import BaseScraper, BrowserScraperBase
 from core.scrapers.ponisha import PonishaScraper
 from core.scrapers.parscoders import ParscodersScraper
 from core.scrapers.freelancer import FreelancerScraper
@@ -343,9 +343,6 @@ def test_freelancer_fetch_projects_mock():
         assert items[0]["currency"] == "USD"
         assert items[0]["url"] == "https://www.freelancer.com/projects/112233"
 
-
-from core.scrapers.base import BrowserScraperBase
-from unittest.mock import patch, MagicMock
 
 def test_browser_scraper_base_fetch():
     class DummyBrowserScraper(BrowserScraperBase):
