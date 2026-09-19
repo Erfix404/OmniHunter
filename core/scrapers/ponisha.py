@@ -5,6 +5,7 @@ from core.scrapers.base import BaseScraper
 
 
 class PonishaScraper(BaseScraper):
+    platform = "ponisha"
     # ponytail: parse embedded Next.js JSON state via regex; upgrade to headless browser if hydration moves fully client-side.
     def __init__(
         self,

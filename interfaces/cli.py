@@ -27,6 +27,7 @@ from core.report import build_markdown_report
 from core.scrapers.freelancer import FreelancerScraper
 from core.scrapers.parscoders import ParscodersScraper
 from core.scrapers.ponisha import PonishaScraper
+from core.scrapers.query_builder import build_search_queries
 from core.triage import evaluate_project
 from interfaces.telegram_bot import poll_updates, send_project_alert
 
@@ -134,6 +135,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Send Telegram alerts for Tier A projects",
+    )
+    scan_parser.add_argument(
+        "--max-queries",
+        type=int,
+        default=8,
+        help="Maximum search queries per platform (0 = unlimited)",
+    )
+    scan_parser.add_argument(
+        "--scope",
+        type=str,
+        default=None,
+        help="Comma-separated scope keys to scan (e.g. bots,excel)",
     )
 
     # list
@@ -243,12 +256,39 @@ def run_scan(
                 elif plat == "freelancer":
                     scrapers_to_run.append(FreelancerScraper(rate_limit_delay_sec=delay))
 
+            only_scopes = None
+            raw_scope_arg = getattr(args, "scope", None)
+            if raw_scope_arg:
+                only_scopes = [s.strip() for s in raw_scope_arg.split(",") if s.strip()]
+
+            max_queries = getattr(args, "max_queries", 8)
+
+            scopes_cfg = cfg.get("scopes")
+            scopes_configured = isinstance(scopes_cfg, dict) and bool(scopes_cfg)
+
             for scraper in scrapers_to_run:
-                try:
-                    fetched = scraper.fetch_projects()
-                    raw_projects.extend(fetched)
-                except Exception as e:
-                    logger.error(f"Scraper error: {e}")
+                platform = getattr(scraper, "platform", "")
+                queries = build_search_queries(
+                    cfg,
+                    platform,
+                    only_scopes=only_scopes,
+                    limit=max_queries,
+                )
+                if not queries:
+                    if only_scopes is not None or scopes_configured:
+                        logger.warning(
+                            "No search queries for platform '%s'; skipping.", platform
+                        )
+                        continue
+                    # No scopes configured at all: fall back to the legacy
+                    # unfiltered fetch so a scope-less config still scans.
+                    queries = [""]
+                for query in queries:
+                    try:
+                        fetched = scraper.fetch_projects(query)
+                        raw_projects.extend(fetched)
+                    except Exception as e:
+                        logger.error("Scraper error on '%s' query '%s': %s", platform, query, e)
 
         # Deduplicate via DB is_seen
         unseen_projects: list[dict[str, Any]] = []

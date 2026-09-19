@@ -491,3 +491,118 @@ def test_cli_owns_db_clean_closure(tmp_path):
         run_list(args_list, db=None)
         mock_close.assert_called_once()
 
+
+def test_scan_parser_has_query_flags():
+    parser = build_parser()
+    args = parser.parse_args(["scan", "--mock", "--max-queries", "3", "--scope", "bots,excel"])
+    assert args.max_queries == 3
+    assert args.scope == "bots,excel"
+
+
+def test_scan_parser_query_flag_defaults():
+    parser = build_parser()
+    args = parser.parse_args(["scan"])
+    assert args.max_queries == 8
+    assert args.scope is None
+
+
+def test_run_scan_queries_each_scraper_per_keyword(monkeypatch, tmp_path):
+    """Each scraper must be called once per keyword, not once total."""
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {"bots": {"enabled": True, "keywords": ["telegram bot", "aiogram"]}},
+    }
+
+    args = cli.build_parser().parse_args(["scan", "--platform", "freelancer"])
+    cli.run_scan(args, config=cfg)
+
+    assert calls == ["telegram bot", "aiogram"]
+
+
+def test_run_scan_max_queries_truncates(monkeypatch, tmp_path):
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {"bots": {"enabled": True, "keywords": ["a", "b", "c"]}},
+    }
+
+    args = cli.build_parser().parse_args(
+        ["scan", "--platform", "freelancer", "--max-queries", "2"]
+    )
+    cli.run_scan(args, config=cfg)
+
+    assert calls == ["a", "b"]
+
+
+def test_run_scan_scope_flag_narrows_scopes(monkeypatch, tmp_path):
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {
+            "bots": {"enabled": True, "keywords": ["telegram bot"]},
+            "excel": {"enabled": True, "keywords": ["excel"]},
+        },
+    }
+
+    args = cli.build_parser().parse_args(
+        ["scan", "--platform", "freelancer", "--scope", "excel"]
+    )
+    cli.run_scan(args, config=cfg)
+
+    assert calls == ["excel"]
+

@@ -11,6 +11,7 @@ from core.scrapers.base import BaseScraper
 
 
 class ParscodersScraper(BaseScraper):
+    platform = "parscoders"
     # ponytail: regex HTML chunker over full DOM parser; avoids external bs4 dependency and runs in <5ms.
     def __init__(
         self,

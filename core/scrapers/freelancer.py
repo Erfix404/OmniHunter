@@ -4,6 +4,7 @@ from core.scrapers.base import BaseScraper
 
 
 class FreelancerScraper(BaseScraper):
+    platform = "freelancer"
     # ponytail: public REST endpoint without OAuth; upgrade to authenticated Freelancer API v1 if rate limit tightens.
     def __init__(
         self,
