@@ -364,3 +364,28 @@ def test_browser_scraper_base_fetch():
         assert content == "<html>Dummy Content</html>"
         mock_sm.goto.assert_called_once_with("http://dummy.com", timeout=30000)
         mock_sm.wait_for_selector.assert_called_once_with(".card", timeout=15000)
+
+from core.scrapers.bitjob import BitjobScraper
+from core.scrapers.karlancer import KarlancerScraper
+from core.scrapers.guru import GuruScraper
+from core.scrapers.laborx import LaborXScraper
+
+def test_new_scraper_platforms_are_pinned():
+    assert BitjobScraper.platform == "bitjob"
+    assert KarlancerScraper.platform == "karlancer"
+    assert GuruScraper.platform == "guru"
+    assert LaborXScraper.platform == "laborx"
+
+def test_bitjob_scraper_parsing():
+    scraper = BitjobScraper()
+    html = '''<div class="project-card"><h2><a href="/project/123">Test Bitjob</a></h2><div class="budget">1000 تا 2000 تومان</div></div>'''
+    res = scraper.parse_html(html)
+    assert len(res) == 1
+    assert res[0]["platform_id"] == "123"
+
+def test_guru_scraper_parsing():
+    scraper = GuruScraper()
+    html = '''<div class="jobRecord"><h2><a href="/job/456">Test Guru</a></h2><div class="budget">$100 - $200</div></div>'''
+    res = scraper.parse_html(html)
+    assert len(res) == 1
+    assert res[0]["currency"] == "USD"
