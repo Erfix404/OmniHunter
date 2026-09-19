@@ -139,8 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument(
         "--max-queries",
         type=int,
-        default=8,
-        help="Maximum search queries per platform (0 = unlimited)",
+        default=0,
+        help=(
+            "Maximum search queries per platform. Default 0 = search every "
+            "keyword of every enabled scope; a finite value caps requests per "
+            "platform and costs coverage."
+        ),
     )
     scan_parser.add_argument(
         "--scope",
@@ -215,6 +219,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dropped_scopes(
+    cfg: dict[str, Any],
+    platform: str,
+    only_scopes: list[str] | None,
+    dropped_queries: list[str],
+) -> list[str]:
+    """Return the scope keys whose keywords were truncated away.
+
+    Only called on the rare truncated path, so the extra per-scope query
+    builds are cheap.
+    """
+    scopes_cfg = cfg.get("scopes")
+    if not isinstance(scopes_cfg, dict):
+        return []
+    dropped = set(dropped_queries)
+    keys = only_scopes if only_scopes is not None else list(scopes_cfg.keys())
+    return sorted(
+        key
+        for key in keys
+        if dropped
+        & set(build_search_queries(cfg, platform, only_scopes=[key], limit=0))
+    )
+
+
 def run_scan(
     args: argparse.Namespace,
     config: dict[str, Any] | None = None,
@@ -261,10 +289,14 @@ def run_scan(
             if raw_scope_arg:
                 only_scopes = [s.strip() for s in raw_scope_arg.split(",") if s.strip()]
 
-            max_queries = getattr(args, "max_queries", 8)
+            max_queries = getattr(args, "max_queries", 0)
 
             scopes_cfg = cfg.get("scopes")
             scopes_configured = isinstance(scopes_cfg, dict) and bool(scopes_cfg)
+
+            # Projects are deduped in-batch by job_hash so a project returned by
+            # several queries is triaged, billed and alerted only once.
+            seen_hashes: set[str] = set()
 
             for scraper in scrapers_to_run:
                 platform = getattr(scraper, "platform", "")
@@ -283,12 +315,44 @@ def run_scan(
                     # No scopes configured at all: fall back to the legacy
                     # unfiltered fetch so a scope-less config still scans.
                     queries = [""]
+
+                if max_queries and max_queries > 0:
+                    full_queries = build_search_queries(
+                        cfg,
+                        platform,
+                        only_scopes=only_scopes,
+                        limit=0,
+                    )
+                    if len(full_queries) > len(queries):
+                        dropped_scopes = _dropped_scopes(
+                            cfg,
+                            platform,
+                            only_scopes,
+                            full_queries[len(queries):],
+                        )
+                        logger.warning(
+                            "--max-queries %d truncated platform '%s' to %d of %d "
+                            "queries; unscanned scopes: %s",
+                            max_queries,
+                            platform,
+                            len(queries),
+                            len(full_queries),
+                            ", ".join(dropped_scopes) if dropped_scopes else "unknown",
+                        )
+
                 for query in queries:
                     try:
                         fetched = scraper.fetch_projects(query)
-                        raw_projects.extend(fetched)
                     except Exception as e:
                         logger.error("Scraper error on '%s' query '%s': %s", platform, query, e)
+                        continue
+                    for project in fetched:
+                        j_hash = project.get("job_hash", "")
+                        if j_hash and j_hash in seen_hashes:
+                            continue
+                        if j_hash:
+                            seen_hashes.add(j_hash)
+                        raw_projects.append(project)
 
         # Deduplicate via DB is_seen
         unseen_projects: list[dict[str, Any]] = []

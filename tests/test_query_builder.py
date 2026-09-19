@@ -1,5 +1,3 @@
-import pytest
-
 from core.scrapers.query_builder import build_search_queries
 
 

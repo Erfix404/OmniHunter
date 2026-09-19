@@ -502,7 +502,8 @@ def test_scan_parser_has_query_flags():
 def test_scan_parser_query_flag_defaults():
     parser = build_parser()
     args = parser.parse_args(["scan"])
-    assert args.max_queries == 8
+    # 0 = search every keyword of every enabled scope (no silent orphaning).
+    assert args.max_queries == 0
     assert args.scope is None
 
 
@@ -605,4 +606,206 @@ def test_run_scan_scope_flag_narrows_scopes(monkeypatch, tmp_path):
     cli.run_scan(args, config=cfg)
 
     assert calls == ["excel"]
+
+
+def test_run_scan_default_searches_all_keywords(monkeypatch, tmp_path):
+    """With no --max-queries, every enabled scope's keyword is searched."""
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {
+            "bots": {"enabled": True, "keywords": ["telegram bot", "aiogram"]},
+            "excel": {"enabled": True, "keywords": ["excel", "vba"]},
+            "disabled": {"enabled": False, "keywords": ["ignored"]},
+        },
+    }
+
+    args = cli.build_parser().parse_args(["scan", "--platform", "freelancer"])
+    cli.run_scan(args, config=cfg)
+
+    assert calls == ["telegram bot", "aiogram", "excel", "vba"]
+
+
+def test_run_scan_max_queries_truncation_logs_dropped_scopes(
+    monkeypatch, tmp_path, caplog
+):
+    """A finite --max-queries must warn about the scopes it truncated away."""
+    import logging
+
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {
+            "bots": {"enabled": True, "keywords": ["a", "b"]},
+            "excel": {"enabled": True, "keywords": ["c"]},
+            "scraping": {"enabled": True, "keywords": ["d"]},
+        },
+    }
+
+    args = cli.build_parser().parse_args(
+        ["scan", "--platform", "freelancer", "--max-queries", "2"]
+    )
+    with caplog.at_level(logging.WARNING, logger="interfaces.cli"):
+        cli.run_scan(args, config=cfg)
+
+    assert calls == ["a", "b"]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    truncation = [w for w in warnings if "truncated" in w]
+    assert len(truncation) == 1
+    assert "excel" in truncation[0]
+    assert "scraping" in truncation[0]
+
+
+def test_run_scan_unlimited_does_not_emit_truncation_warning(
+    monkeypatch, tmp_path, caplog
+):
+    """The default unlimited path must stay quiet (no dropped-scope warning)."""
+    import logging
+
+    from interfaces import cli
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {"bots": {"enabled": True, "keywords": ["a", "b", "c"]}},
+    }
+
+    args = cli.build_parser().parse_args(["scan", "--platform", "freelancer"])
+    with caplog.at_level(logging.WARNING, logger="interfaces.cli"):
+        cli.run_scan(args, config=cfg)
+
+    assert not [r for r in caplog.records if "truncated" in r.getMessage()]
+
+
+def test_run_scan_dedupes_same_job_hash_across_queries(monkeypatch, tmp_path):
+    """A project returned by several queries must be processed only once."""
+    from interfaces import cli
+
+    duplicate = {
+        "platform": "freelancer",
+        "platform_id": "dup_1",
+        "job_hash": "shared_hash",
+        "title": "Python Telegram Bot",
+        "url": "https://www.freelancer.com/projects/dup_1",
+        "budget_min": 200,
+        "budget_max": 400,
+        "currency": "USD",
+        "description": "Need a python telegram bot with aiogram.",
+        "skills": ["python", "telegram"],
+    }
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            return [dict(duplicate)]
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "reports": {"directory": str(tmp_path / "reports")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {"bots": {"enabled": True, "keywords": ["a", "b", "c"]}},
+    }
+
+    args = cli.build_parser().parse_args(["scan", "--platform", "freelancer"])
+    processed = cli.run_scan(args, config=cfg)
+
+    assert len(processed) == 1
+    assert processed[0]["job_hash"] == "shared_hash"
+
+
+def test_run_scan_unknown_scope_is_skipped_honestly(monkeypatch, tmp_path, caplog):
+    """An explicit --scope matching no configured scope must not scrape."""
+    import logging
+
+    from interfaces import cli
+
+    calls = []
+
+    class FakeScraper:
+        platform = "freelancer"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def fetch_projects(self, query=""):
+            calls.append(query)
+            return []
+
+    monkeypatch.setattr(cli, "FreelancerScraper", FakeScraper)
+    monkeypatch.setattr(cli, "PonishaScraper", FakeScraper)
+    monkeypatch.setattr(cli, "ParscodersScraper", FakeScraper)
+
+    cfg = {
+        "database": {"path": str(tmp_path / "t.db")},
+        "reports": {"directory": str(tmp_path / "reports")},
+        "platforms": {"freelancer": {"enabled": True, "rate_limit_delay_sec": 0}},
+        "scopes": {"bots": {"enabled": True, "keywords": ["telegram bot"]}},
+    }
+
+    args = cli.build_parser().parse_args(
+        ["scan", "--platform", "freelancer", "--scope", "nonexistent"]
+    )
+    with caplog.at_level(logging.WARNING, logger="interfaces.cli"):
+        result = cli.run_scan(args, config=cfg)
+
+    assert calls == []
+    assert result == []
+    assert any("No search queries" in r.getMessage() for r in caplog.records)
 

@@ -1,7 +1,7 @@
 """Derive per-platform search queries from the configured scopes.
 
 Iranian marketplaces are queried with Persian keywords and the foreign one
-with English keywords, so a request never burns rate limit on a term the
+with non-Persian keywords, so a request never burns rate limit on a term the
 portal's audience does not write in.
 """
 import re
