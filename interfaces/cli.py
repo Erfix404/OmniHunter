@@ -216,6 +216,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Poll Telegram updates once and exit",
     )
 
+    # browser
+    browser_parser = subparsers.add_parser("browser", help="Manage browser profiles and connections")
+    browser_parser.add_argument("--list", action="store_true", help="List Chrome profiles")
+    browser_parser.add_argument("--status", action="store_true", help="Check CDP port status")
+
     return parser
 
 
@@ -576,6 +581,25 @@ def run_bot(
             db.close()
 
 
+def run_browser(args: argparse.Namespace) -> None:
+    if getattr(args, "list", False):
+        from core.browser.profiles import get_chrome_profiles
+        profiles = get_chrome_profiles()
+        print(f"{'DIR NAME':<14} {'DISPLAY NAME':<20} EMAIL")
+        print("-" * 60)
+        for k, v in sorted(profiles.items()):
+            email = v.get("email") or "-"
+            marker = " *" if v.get("is_last_used") else ""
+            print(f"{k:<14} {v.get('name'):<20} {email}{marker}")
+    elif getattr(args, "status", False):
+        from core.browser.connection import get_active_port
+        port_info = get_active_port()
+        if port_info:
+            print(f"Approval Mode Active. Listening on port: {port_info[0]}")
+        else:
+            print("Approval Mode NOT Active. No DevToolsActivePort found.")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entrypoint."""
     parser = build_parser()
@@ -595,6 +619,8 @@ def main(argv: list[str] | None = None) -> int:
         run_auth(args)
     elif args.command == "bot":
         run_bot(args)
+    elif args.command == "browser":
+        run_browser(args)
     else:
         parser.print_help()
 
