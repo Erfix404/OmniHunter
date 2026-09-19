@@ -264,6 +264,59 @@ def test_parscoders_fetch_projects_mock():
         assert items[0]["platform_id"] == "77"
 
 
+def test_scraper_platform_attributes_are_pinned():
+    """The `platform` class attribute drives language routing.
+
+    `interfaces.cli.run_scan` reads `scraper.platform` and passes it to
+    `build_search_queries`, which classifies the platform as Iranian (Persian
+    keywords) or foreign (English keywords) via `IRANIAN_PLATFORMS`. The CLI
+    tests inject a `FakeScraper` with its own `platform`, so nothing else in the
+    suite consults the real classes: deleting `platform = "ponisha"` from
+    `core/scrapers/ponisha.py` would silently invert Persian/English routing
+    with a fully green suite. Pin the literals here so that cannot happen.
+    """
+    assert PonishaScraper.platform == "ponisha"
+    assert ParscodersScraper.platform == "parscoders"
+    assert FreelancerScraper.platform == "freelancer"
+
+
+def test_scraper_platform_attributes_match_config_keys():
+    """The pinned `platform` names must be exactly the keys in `config.yaml`.
+
+    Pinning the literals alone would still let the two sides drift: renaming the
+    `platforms:` key in `config.yaml` (e.g. `ponisha` -> `ponisha_ir`) would leave
+    the scraper attribute pointing at a key that no longer exists, and the CLI
+    would silently route that platform through the foreign/English branch. This
+    test fails if either side is renamed on its own.
+    """
+    import yaml
+    from pathlib import Path
+
+    from core.scrapers.query_builder import IRANIAN_PLATFORMS
+
+    config_path = Path(__file__).resolve().parent.parent / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    config_keys = set(config["platforms"].keys())
+    scraper_platforms = {
+        PonishaScraper.platform,
+        ParscodersScraper.platform,
+        FreelancerScraper.platform,
+    }
+
+    # Every scraper's platform name is a real key in config.yaml's platforms block.
+    assert scraper_platforms == config_keys
+
+    # ...and the language-routing classification uses names drawn from that same
+    # set, so a name that does not match a config key cannot reach the router.
+    assert IRANIAN_PLATFORMS.issubset(config_keys)
+    # The Iranian/foreign split is the routing contract: Persian marketplaces get
+    # Persian keywords, the foreign one does not.
+    assert IRANIAN_PLATFORMS == {"ponisha", "parscoders"}
+    assert FreelancerScraper.platform not in IRANIAN_PLATFORMS
+
+
 def test_freelancer_fetch_projects_mock():
     scraper = FreelancerScraper()
     mock_resp = MagicMock()
