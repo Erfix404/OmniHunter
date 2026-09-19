@@ -27,6 +27,10 @@ from core.report import build_markdown_report
 from core.scrapers.freelancer import FreelancerScraper
 from core.scrapers.parscoders import ParscodersScraper
 from core.scrapers.ponisha import PonishaScraper
+from core.scrapers.bitjob import BitjobScraper
+from core.scrapers.karlancer import KarlancerScraper
+from core.scrapers.guru import GuruScraper
+from core.scrapers.laborx import LaborXScraper
 from core.scrapers.query_builder import build_search_queries
 from core.triage import evaluate_project
 from interfaces.telegram_bot import poll_updates, send_project_alert
@@ -278,7 +282,7 @@ def run_scan(
             else:
                 platforms = [p for p, pcfg in plat_cfgs.items() if pcfg.get("enabled", True)]
                 if not platforms:
-                    platforms = ["ponisha", "parscoders", "freelancer"]
+                    platforms = ["ponisha", "parscoders", "freelancer", "bitjob", "karlancer", "guru", "laborx"]
 
             for plat in platforms:
                 delay = plat_cfgs.get(plat, {}).get("rate_limit_delay_sec", 2.0)
@@ -288,6 +292,14 @@ def run_scan(
                     scrapers_to_run.append(ParscodersScraper(rate_limit_delay_sec=delay))
                 elif plat == "freelancer":
                     scrapers_to_run.append(FreelancerScraper(rate_limit_delay_sec=delay))
+                elif plat == "bitjob":
+                    scrapers_to_run.append(BitjobScraper(rate_limit_delay_sec=delay))
+                elif plat == "karlancer":
+                    scrapers_to_run.append(KarlancerScraper(rate_limit_delay_sec=delay))
+                elif plat == "guru":
+                    scrapers_to_run.append(GuruScraper(rate_limit_delay_sec=delay))
+                elif plat == "laborx":
+                    scrapers_to_run.append(LaborXScraper(rate_limit_delay_sec=delay))
 
             only_scopes = None
             raw_scope_arg = getattr(args, "scope", None)

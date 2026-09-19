@@ -7,7 +7,7 @@ portal's audience does not write in.
 import re
 from typing import Any
 
-IRANIAN_PLATFORMS = frozenset({"ponisha", "parscoders"})
+IRANIAN_PLATFORMS = frozenset({"ponisha", "parscoders", "bitjob", "karlancer"})
 
 _PERSIAN_RE = re.compile(r"[؀-ۿ]")
 
