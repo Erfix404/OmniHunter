@@ -16,7 +16,9 @@ def get_chrome_profiles() -> dict[str, dict[str, Any]]:
     try:
         with open(local_state_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except OSError:
+            if not isinstance(data, dict):
+                return {}
+    except (OSError, json.JSONDecodeError):
         return {}
 
     profile_data = data.get("profile", {})

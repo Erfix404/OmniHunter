@@ -1,8 +1,10 @@
+import os
 import json
 import pytest
 from core.browser.profiles import get_chrome_profiles
 
 def test_get_chrome_profiles_parses_local_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.name", "nt")
     local_state_data = {
         "profile": {
             "info_cache": {
@@ -27,6 +29,7 @@ def test_get_chrome_profiles_parses_local_state(tmp_path, monkeypatch):
     assert profiles["Default"]["is_last_used"] is False
 
 def test_get_chrome_profiles_handles_missing_file(monkeypatch):
+    monkeypatch.setattr("os.name", "nt")
     monkeypatch.setattr("os.path.expandvars", lambda x: "C:/non/existent/path/Local State")
     profiles = get_chrome_profiles()
     assert profiles == {}
