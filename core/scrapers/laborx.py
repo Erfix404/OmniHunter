@@ -11,6 +11,8 @@ class LaborXScraper(BaseScraper):
 
     def fetch_projects(self, search_query: str = "") -> list[dict[str, Any]]:
         url = f"{self.base_url}/jobs"
+        if search_query:
+            url += f"?q={search_query}"
         resp = self.get(url)
         if resp and resp.status_code == 200:
             return self.parse_html(resp.text)

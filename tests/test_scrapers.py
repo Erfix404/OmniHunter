@@ -6,6 +6,10 @@ from core.scrapers.base import BaseScraper, BrowserScraperBase
 from core.scrapers.ponisha import PonishaScraper
 from core.scrapers.parscoders import ParscodersScraper
 from core.scrapers.freelancer import FreelancerScraper
+from core.scrapers.bitjob import BitjobScraper
+from core.scrapers.karlancer import KarlancerScraper
+from core.scrapers.guru import GuruScraper
+from core.scrapers.laborx import LaborXScraper
 
 
 REQUIRED_KEYS = {
@@ -307,6 +311,7 @@ def test_scraper_platform_attributes_match_config_keys():
 
     # We skip the subset check since config.yaml may not have all platforms yet.
     # We only check that the original platforms exist in config_keys.
+    # TODO: Revert to exact == match and IRANIAN_PLATFORMS.issubset once config.yaml is updated in Phase 5.
     assert scraper_platforms.issubset(config_keys)
     # The Iranian/foreign split is the routing contract: Persian marketplaces get
     # Persian keywords, the foreign one does not.
@@ -362,11 +367,6 @@ def test_browser_scraper_base_fetch():
         mock_sm.goto.assert_called_once_with("http://dummy.com", timeout=30000)
         mock_sm.wait_for_selector.assert_called_once_with(".card", timeout=15000)
 
-from core.scrapers.bitjob import BitjobScraper
-from core.scrapers.karlancer import KarlancerScraper
-from core.scrapers.guru import GuruScraper
-from core.scrapers.laborx import LaborXScraper
-
 def test_new_scraper_platforms_are_pinned():
     assert BitjobScraper.platform == "bitjob"
     assert KarlancerScraper.platform == "karlancer"
@@ -375,10 +375,12 @@ def test_new_scraper_platforms_are_pinned():
 
 def test_bitjob_scraper_parsing():
     scraper = BitjobScraper()
-    html = '''<div class="project-card"><h2><a href="/project/123">Test Bitjob</a></h2><div class="budget">1000 تا 2000 تومان</div></div>'''
+    html = '''<div class="project-card"><h2><a href="/project/123">Test Bitjob</a></h2><div class="budget">1,000 تا 2,000 تومان</div></div>'''
     res = scraper.parse_html(html)
     assert len(res) == 1
     assert res[0]["platform_id"] == "123"
+    assert res[0]["budget_min"] == 1000.0
+    assert res[0]["budget_max"] == 2000.0
 
 def test_guru_scraper_parsing():
     scraper = GuruScraper()

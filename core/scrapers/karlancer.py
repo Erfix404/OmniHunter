@@ -11,6 +11,8 @@ class KarlancerScraper(BrowserScraperBase):
 
     def fetch_projects(self, search_query: str = "") -> list[dict[str, Any]]:
         url = f"{self.base_url}/projects"
+        if search_query:
+            url += f"?q={search_query}"
         html = self.fetch_via_browser(url, wait_selector=".project-card")
         return self.parse_html(html)
 

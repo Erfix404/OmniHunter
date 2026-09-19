@@ -11,6 +11,8 @@ class BitjobScraper(BrowserScraperBase):
 
     def fetch_projects(self, search_query: str = "") -> list[dict[str, Any]]:
         url = f"{self.base_url}/projects"
+        if search_query:
+            url += f"?q={search_query}"
         html = self.fetch_via_browser(url, wait_selector=".project-card")
         return self.parse_html(html)
 
@@ -37,10 +39,10 @@ class BitjobScraper(BrowserScraperBase):
             # Budget
             budget_min = None
             budget_max = None
-            budget_match = re.search(r'<div class="budget">.*?(\d+).*?(\d+).*?</div>', card)
+            budget_match = re.search(r'<div class="budget">.*?([\d,]+).*?([\d,]+).*?</div>', card)
             if budget_match:
-                budget_min = float(budget_match.group(1))
-                budget_max = float(budget_match.group(2))
+                budget_min = float(budget_match.group(1).replace(',', ''))
+                budget_max = float(budget_match.group(2).replace(',', ''))
                 
             projects.append(self.normalize_project(
                 platform=self.platform,
