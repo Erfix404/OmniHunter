@@ -88,6 +88,39 @@ class BaseScraper:
         }
 
 
+
+from core.browser.session import SessionManager
+
+class BrowserScraperBase(BaseScraper):
+    """Base class for scrapers that require JavaScript rendering via Playwright."""
+    
+    def fetch_via_browser(self, url: str, wait_selector: str, timeout: int = 30000) -> str:
+        """Fetch fully rendered HTML using an isolated headless browser session."""
+        try:
+            with SessionManager(mode="isolated", timeout=timeout) as page:
+                page.goto(url, timeout=timeout)
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, timeout=15000)
+                    except Exception:
+                        pass # Continue even if selector fails, maybe content loaded differently
+                return page.content()
+        except NotImplementedError:
+            # Fallback if isolated mode isn't fully implemented yet, use live mode but headless isn't supported there easily without new context.
+            # We'll use live mode as a safe fallback for the MVP.
+            with SessionManager(mode="live", timeout=timeout) as page:
+                page.goto(url, timeout=timeout)
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, timeout=15000)
+                    except Exception:
+                        pass
+                return page.content()
+        except Exception as e:
+            print(f"Browser fetch failed: {e}")
+            return ""
+
+
 if __name__ == "__main__":
     scraper = BaseScraper()
     item = scraper.normalize_project(

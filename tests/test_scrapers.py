@@ -343,3 +343,27 @@ def test_freelancer_fetch_projects_mock():
         assert items[0]["currency"] == "USD"
         assert items[0]["url"] == "https://www.freelancer.com/projects/112233"
 
+
+from core.scrapers.base import BrowserScraperBase
+from unittest.mock import patch, MagicMock
+
+def test_browser_scraper_base_fetch():
+    class DummyBrowserScraper(BrowserScraperBase):
+        platform = "dummy"
+        def fetch_projects(self, query=""):
+            return []
+            
+    scraper = DummyBrowserScraper()
+    
+    # We mock SessionManager to avoid actually launching Playwright in tests
+    with patch("core.scrapers.base.SessionManager") as mock_sm_cls:
+        mock_sm = mock_sm_cls.return_value.__enter__.return_value
+        mock_sm.goto.return_value = None
+        mock_sm.wait_for_selector.return_value = None
+        mock_sm.content.return_value = "<html>Dummy Content</html>"
+        
+        content = scraper.fetch_via_browser("http://dummy.com", ".card")
+        
+        assert content == "<html>Dummy Content</html>"
+        mock_sm.goto.assert_called_once_with("http://dummy.com", timeout=30000)
+        mock_sm.wait_for_selector.assert_called_once_with(".card", timeout=15000)
