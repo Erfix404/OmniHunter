@@ -393,3 +393,43 @@ def test_architect_empty_input_has_new_fields():
     assert "clarifying_question" in arch_none
 
 
+def _proposal_for(scope):
+    proj = {
+        "title": f"پروژه نمونه {scope}",
+        "description": "توضیحات سناریوی پروژه",
+        "scope": scope,
+        "currency": "IRT",
+    }
+    return generate_architecture(proj)["proposal"]
+
+
+def test_proposals_contain_zero_code_blocks():
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proposal = _proposal_for(scope)
+        assert "```" not in proposal, f"Code block leaked in {scope} proposal"
+        assert "`" not in proposal, f"Inline code leaked in {scope} proposal"
+
+
+def test_proposals_follow_four_persuasion_pillars():
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proposal = _proposal_for(scope)
+        # Pillar 1: pain-point empathy & business context
+        assert "دغدغه" in proposal, f"Missing empathy pillar in {scope}"
+        # Pillar 2: clean 3-step conceptual workflow
+        assert "گام اول" in proposal, f"Missing step 1 in {scope}"
+        assert "گام دوم" in proposal, f"Missing step 2 in {scope}"
+        assert "گام سوم" in proposal, f"Missing step 3 in {scope}"
+        # Pillar 3: risk reversal & peace of mind
+        assert "بدون هزینه اضافه" in proposal, f"Missing risk reversal in {scope}"
+        assert "تست" in proposal, f"Missing testing commitment in {scope}"
+        # Pillar 4: low-friction CTA
+        assert "خوشحال می‌شم در چت گفتگو کنیم" in proposal, f"Missing CTA in {scope}"
+
+
+def test_proposals_keep_tone_avoidances():
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proposal = _proposal_for(scope)
+        assert "سلام و احترام" not in proposal
+        assert "امیدوارم حالتون خوب باشه" not in proposal
+
+

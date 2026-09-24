@@ -45,6 +45,57 @@ DEFAULT_SCAM_BLACKLIST: list[str] = [
     "پرداخت قبل از شروع",
 ]
 
+DEFAULT_RED_FLAGS: list[str] = [
+    "تست رایگان",
+    "نمونه رایگان",
+    "پروژه تستی رایگان",
+    "free test",
+    "free sample",
+    "کار دو ساعته",
+    "کار ساده و سریع",
+    "کار چند دقیقه ای",
+    "خیلی راحته",
+    "کار آسونیه",
+    "two hour job",
+    "very easy job",
+    "پشتیبانی نامحدود",
+    "پشتیبانی دائمی رایگان",
+    "unlimited support",
+    "تغییرات جزئی حین کار",
+    "تغییرات مکرر",
+    "تغییرات بعد از تحویل",
+    "ارزان ترین قیمت",
+    "کمترین هزینه با بالاترین کیفیت",
+    "lowest budget",
+    "cheapest",
+    "تسویه بعد از تست یک ماهه",
+]
+
+_RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def detect_red_flags(title_norm: str, desc_norm: str) -> list[str]:
+    """Return the subset of DEFAULT_RED_FLAGS found in normalized title/description."""
+    combined = f"{title_norm or ''} {desc_norm or ''}".strip()
+    if not combined:
+        return []
+    matched: list[str] = []
+    for flag in DEFAULT_RED_FLAGS:
+        flag_norm = normalize_text(flag)
+        if flag_norm and flag_norm in combined:
+            matched.append(flag)
+    return matched
+
+
+def assess_client_risk(red_flags: list[str] | None) -> str:
+    """Map red-flag count to client risk level."""
+    count = len(red_flags or [])
+    if count >= 2:
+        return "high"
+    if count == 1:
+        return "medium"
+    return "low"
+
 DEFAULT_SCOPES: dict[str, dict[str, Any]] = {
     "bots": {
         "name": "Telegram & Bale Bots",
@@ -298,8 +349,11 @@ def evaluate_project(
         "rejection_reason": str | None,
         "estimated_hours": float | None,
         "roi_score": float | None,
+        "client_risk": "low" | "medium" | "high",
+        "red_flags": list[str],
     }
     """
+    _empty_risk_flags: list[str] = []
     if not isinstance(project, dict):
         return {
             "tier": "C",
@@ -314,6 +368,8 @@ def evaluate_project(
             "difficulty_score": 5,
             "win_probability": 0.10,
             "pricing_strategy": "competitive_entry",
+            "client_risk": "low",
+            "red_flags": _empty_risk_flags,
         }
 
     cfg = config or {}
@@ -322,6 +378,10 @@ def evaluate_project(
     title_norm = normalize_text(project.get("title"))
     desc_norm = normalize_text(project.get("description"))
     combined_text = f"{title_norm} {desc_norm}"
+
+    # 1b. Client risk & red-flag vetting (toxic-client phrases)
+    red_flags = detect_red_flags(title_norm, desc_norm)
+    client_risk = assess_client_risk(red_flags)
 
     raw_skills = project.get("skills") or []
     skills_norm = [
@@ -352,6 +412,8 @@ def evaluate_project(
                 "difficulty_score": 5,
                 "win_probability": 0.10,
                 "pricing_strategy": "competitive_entry",
+                "client_risk": client_risk,
+                "red_flags": red_flags,
             }
 
     # 3. Scope Matching
@@ -392,6 +454,8 @@ def evaluate_project(
             "difficulty_score": 5,
             "win_probability": 0.10,
             "pricing_strategy": "competitive_entry",
+            "client_risk": client_risk,
+            "red_flags": red_flags,
         }
 
     # 4. Budget & Floor Verification
@@ -445,6 +509,8 @@ def evaluate_project(
                 "difficulty_score": _ds,
                 "win_probability": _wp,
                 "pricing_strategy": _ps,
+                "client_risk": client_risk,
+                "red_flags": red_flags,
             }
 
     b_min = _parse_budget_val(project.get("budget_min"))
@@ -485,6 +551,8 @@ def evaluate_project(
             "difficulty_score": _ds,
             "win_probability": _wp,
             "pricing_strategy": _ps,
+            "client_risk": client_risk,
+            "red_flags": red_flags,
         }
 
     # 5. Tier Assignment
@@ -497,6 +565,17 @@ def evaluate_project(
     else:
         tier = "B"
         rejection_reason = None
+
+    # 5b. Risk impact: high-risk clients are downgraded to protect the freelancer.
+    if client_risk == "high":
+        if tier == "A":
+            tier = "B"
+            rejection_reason = rejection_reason or "high_client_risk"
+        elif tier == "B":
+            tier = "C"
+            rejection_reason = rejection_reason or "high_client_risk"
+        else:
+            rejection_reason = rejection_reason or "high_client_risk"
 
     # 6. New enrichment fields
     claude_leverage = CLAUDE_LEVERAGE.get(best_scope, 5)
@@ -517,6 +596,8 @@ def evaluate_project(
         "difficulty_score": difficulty_score,
         "win_probability": win_probability,
         "pricing_strategy": pricing_strategy,
+        "client_risk": client_risk,
+        "red_flags": red_flags,
     }
 
 

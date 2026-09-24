@@ -36,6 +36,8 @@ class DB:
         "prerequisites",
         "technical_hook",
         "clarifying_question",
+        "client_risk",
+        "red_flags",
     }
 
     APPLICATION_COLUMNS = {
@@ -90,6 +92,8 @@ class DB:
                 prerequisites TEXT,
                 technical_hook TEXT,
                 clarifying_question TEXT,
+                client_risk TEXT,
+                red_flags TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -122,6 +126,8 @@ class DB:
             "prerequisites": "TEXT",
             "technical_hook": "TEXT",
             "clarifying_question": "TEXT",
+            "client_risk": "TEXT",
+            "red_flags": "TEXT",
         }
         cursor = self.conn.execute("PRAGMA table_info(projects)")
         existing_cols = {row[1] for row in cursor.fetchall()}
@@ -304,13 +310,17 @@ class DB:
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """Convert a sqlite3.Row to a dictionary, unpacking JSON fields."""
         d = dict(row)
-        for field in ("tech_stack", "roadmap", "skills", "prerequisites"):
+        for field in ("tech_stack", "roadmap", "skills", "prerequisites", "red_flags"):
             val = d.get(field)
             if isinstance(val, str) and val.startswith(("[", "{")):
                 try:
                     d[field] = json.loads(val)
                 except (json.JSONDecodeError, TypeError):
                     pass
+        if isinstance(d.get("red_flags"), str):
+            d["red_flags"] = []
+        if d.get("red_flags") is None and "red_flags" in d:
+            d["red_flags"] = []
         return d
 
     def close(self) -> None:

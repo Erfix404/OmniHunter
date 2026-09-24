@@ -316,6 +316,19 @@ def _align_bid_with_profile_rate(
     return max(50000, int(round(target / 50000.0) * 50000))
 
 
+def _strip_code_blocks(text: str) -> str:
+    """Remove markdown code blocks, inline code, and raw code snippets."""
+    if not text:
+        return text
+    # Remove fenced code blocks (```...```) entirely.
+    cleaned = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    # Remove any leftover fence markers.
+    cleaned = cleaned.replace("```", "")
+    # Remove inline code spans (`...`) but keep the inner text.
+    cleaned = re.sub(r"`([^`\n]+)`", r"\1", cleaned)
+    return cleaned.strip()
+
+
 def _build_rule_based_proposal(
     project: dict[str, Any],
     scope: str,
@@ -323,67 +336,102 @@ def _build_rule_based_proposal(
     roadmap: list[str],
     delivery_days: int,
 ) -> str:
-    stack_list = "\n".join(f"• {item}" for item in tech_stack)
-    roadmap_list = "\n".join(f"{step}" for step in roadmap)
+    """Build a high-level 4-pillar persuasion proposal (no code, no code blocks)."""
+    title = str(project.get("title") or "").strip()
+    title_ref = f" «{title}»" if title else ""
 
+    is_bale = any("bale" in str(item).lower() for item in tech_stack) or (
+        "بله" in normalize_text(project.get("title"))
+        or "بله" in normalize_text(project.get("description"))
+    )
+
+    # Pillar 1: Pain-point empathy & business context (scope-specific).
     if scope == "bots":
-        framework_mention = (
-            "Bale Bot API (یا کلاینت اختصاصی بله)"
-            if any("bale" in item.lower() for item in tech_stack)
-            else "فریم‌ورک غیرهمگام aiogram 3.x"
+        platform_ref = "پیام‌رسان بله" if is_bale else "تلگرام"
+        empathy = (
+            f"دغدغه اصلی شما در این پروژه{title_ref} کاملاً مشخص است: یک {platform_ref} پایدار "
+            "که بدون قطعی پاسخ بدهد، سفارش‌ها و پیام‌ها را دقیق و امن ثبت کند و در ساعات شلوغی هم "
+            "بدون افت کیفیت کار کند. مهم‌ترین ریسک چنین پروژه‌هایی از نگاه کسب‌وکار، ناپایداری، "
+            "از دست رفتن پیام‌ها و درگیر شدن با محدودیت یا مسدود شدن حساب است؛ "
+            "معماری پیشنهادی من دقیقاً برای رفع همین دغدغه‌ها طراحی شده است."
         )
-        opening = (
-            f"برای پیاده‌سازی این پروژه، معماری پیشنهادی مبتنی بر پایتون ۳.۱۲ و {framework_mention} است "
-            "که پایداری و پردازش همزمان بالایی ارائه می‌دهد. مدیریت نشست‌های کاربران، ماشین حالت (FSM) "
-            "و ذخیره‌سازی داده‌ها در یک پایگاه داده استاندارد و ایمن انجام خواهد شد."
+        tool_hint = (
+            "پیام‌رسان بله" if is_bale
+            else "پایتون با فریم‌ورک غیرهمگام aiogram"
         )
+        step_one_tail = "بررسی نیازمندی‌ها، دریافت توکن و اتصال امن اولیه به پیام‌رسان و پیکربندی محیط اجرا"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار گفتگو با مدیریت خطا، تلاش مجدد و پایداری در بار همزمان"
     elif scope == "automation":
-        opening = (
-            "برای خودکارسازی این فرآیند، پایپ‌لاین بهینه و ماژولار با پایتون و ابزارهای وب‌هوک/n8n "
-            "طراحی و پیاده‌سازی می‌شود. فرآیند انتقال داده با اعتبارسنجی ورودی، بازتلاش خودکار (Retry Policy) "
-            "و سیستم ثبت لاگ پیاده‌سازی خواهد شد تا از صحت و عدم افت اطلاعات اطمینان حاصل شود."
+        empathy = (
+            f"درک می‌کنم که دغدغه اصلی شما در این پروژه{title_ref} حذف ساعت‌ها کار دستی تکراری، "
+            "جلوگیری از خطای انسانی و اطمینان از انتقال دقیق و بدون افت داده‌ها بین سرویس‌هاست. "
+            "بزرگ‌ترین درد چنین فرآیندهایی، توقف‌های نامرئی و مغایرت داده‌هاست که مستقیم روی درآمد و اعتماد مشتری اثر می‌گذارد؛ "
+            "راه‌حل پیشنهادی من دقیقاً روی همین نقطه تمرکز دارد."
         )
+        tool_hint = "پایتون در کنار ابزارهای اتوماسیون و وب‌هوک"
+        step_one_tail = "بررسی نیازمندی‌ها، شناسایی نقاط اتصال سرویس‌ها و پیکربندی امن اولیه ارتباط‌ها"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار انتقال داده با مدیریت خطا، تلاش مجدد و پایداری"
     elif scope == "translation":
-        opening = (
-            "برای انجام ترجمه تخصصی این پروژه، فرآیند بر پایه معادل‌یابی دقیق دانشگاهی و نگارش سلیس و علمی "
-            "پیش خواهد رفت. در فاز نخست، یک واژه‌نامه تخصصی (Glossary) از اصطلاحات کلیدی حوزه مربوطه استخراج و تدوین "
-            "می‌شود تا یکدستی واژگان در تمام متن حفظ شده و از ترجمه‌های تحت‌اللفظی یا ماشینی پرهیز گردد."
+        empathy = (
+            f"دغدغه اصلی شما در این پروژه{title_ref} روشن است: متنی دقیق، روان و علمی که اصطلاحات تخصصی "
+            "در سراسر آن یکدست باشد و اعتبار علمی کار حفظ شود. درد رایج، ترجمه‌های تحت‌اللفظی یا ماشینی است "
+            "که اعتماد خواننده را از بین می‌برد؛ فرآیند پیشنهادی من دقیقاً برای رفع همین دغدغه طراحی شده است."
         )
+        tool_hint = "فرآیند ترجمه تخصصی با واژه‌نامه یکپارچه"
+        step_one_tail = "بررسی نیازمندی‌ها، استخراج اصطلاحات کلیدی و پیکربندی اولیه واژه‌نامه تخصصی"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار بازبینی کیفی با مدیریت خطا و پایداری یکدستی واژگان"
     elif scope == "excel":
-        opening = (
-            "برای پردازش و اتوماسیون داده‌های اکسل، از ترکیب فرمول‌های محاسباتی پیشرفته و اسکریپت‌های پایتون "
-            "با کتابخانه‌های openpyxl و pandas استفاده می‌شود. ساختار داده‌ها نرمال‌سازی شده، اعتبارسنجی خودکار "
-            "اعمال می‌گردد و خروجی نهایی با کاربری آسان و گزارش‌گیری تمیز آماده خواهد شد."
+        empathy = (
+            f"دغدغه اصلی شما در این پروژه{title_ref} مشخص است: داده‌هایی تمیز و قابل اتکا که بدون ساعت‌ها کار دستی، "
+            "محاسباتشان دقیق باشد و گزارش‌گیری از آن‌ها ساده شود. درد رایج، فرمول‌های شکننده و خطاهای پنهان محاسباتی است؛ "
+            "راه‌حل پیشنهادی من دقیقاً برای رفع همین دغدغه طراحی شده است."
         )
+        tool_hint = "پایتون با کتابخانه‌های پردازش داده در کنار فرمول‌های پیشرفته اکسل"
+        step_one_tail = "بررسی نیازمندی‌ها، شناخت ساختار داده‌ها و پیکربندی امن اولیه فایل‌ها و الگوها"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار محاسبات و پاکسازی با مدیریت خطا و پایداری نتایج"
     elif scope == "scraping":
-        opening = (
-            "برای استخراج ساختاریافته داده‌های مورد نظر، خزنده‌ای پایدار مبتنی بر Python 3.12 و ابزارهای "
-            "Playwright / BeautifulSoup پیاده‌سازی خواهد شد. اسکریپت با مدیریت ریت‌لیمیت، دور زدن محدودیت‌های خزش "
-            "و پردازش درخواست‌های داینامیک، خروجی داده‌ها را در فرمت استاندارد (Excel / CSV / JSON) استخراج می‌کند."
+        empathy = (
+            f"دغدغه اصلی شما در این پروژه{title_ref} کاملاً قابل درک است: دسترسی به داده‌هایی دقیق و به‌روز "
+            "بدون صرف ساعت‌ها کار دستی، با خروجی تمیز و قابل استفاده. درد اصلی چنین پروژه‌هایی، مسدود شدن دسترسی، "
+            "ناقص ماندن داده‌ها و بی‌ثباتی در برابر تغییرات سایت است؛ راه‌حل پیشنهادی من دقیقاً برای رفع همین دغدغه‌ها طراحی شده است."
         )
+        tool_hint = "پایتون با ابزارهای مرورگر خودکار و استخراج ساختاریافته"
+        step_one_tail = "بررسی نیازمندی‌ها، شناسایی صفحات هدف و پیکربندی امن اولیه دسترسی و نرخ درخواست"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار استخراج و پاکسازی داده با مدیریت خطا و پایداری"
     else:  # scripting
-        opening = (
-            "برای پیاده‌سازی این اسکریپت، ساختاری ماژولار و تمیز با Python 3.12، مدیریت خطا و لاگ‌گیری استاندارد "
-            "طراحی می‌شود. تفکیک لایه‌های پردازش و داده با Type Hinting کامل پیاده‌سازی خواهد شد تا پایداری و نگهداری "
-            "ساده کد در طولانی‌مدت تضمین شود."
+        empathy = (
+            f"دغدغه اصلی شما در این پروژه{title_ref} روشن است: ابزاری پایدار و قابل اتکا که ورودی‌ها را درست پردازش کند، "
+            "در شرایط خطا متوقف نشود و نگهداری آن در بلندمدت ساده باشد. درد رایج، اسکریپت‌های شکننده‌ای است که با اولین "
+            "ورودی غیرمنتظره از کار می‌افتند؛ معماری پیشنهادی من دقیقاً برای رفع همین دغدغه طراحی شده است."
         )
+        tool_hint = "پایتون با ساختار ماژولار و تمیز"
+        step_one_tail = "بررسی نیازمندی‌ها، شناخت ورودی‌ها و خروجی‌ها و پیکربندی امن اولیه محیط اجرا"
+        step_two_tail = "پیاده‌سازی هسته پردازش و منطق خودکار برنامه با مدیریت خطا، ثبت رویداد و پایداری"
+
+    intro = f"{empathy} برای این منظور، از {tool_hint} استفاده می‌کنم."
 
     proposal = (
-        f"{opening}\n\n"
-        "پشته فنی و ابزارهای مورد استفاده:\n"
-        f"{stack_list}\n\n"
-        "نقشه راه و مراحل اجرا:\n"
-        f"{roadmap_list}\n\n"
-        "تعهد کیفیت و پشتیبانی:\n"
-        "• تست جامع سناریوهای کاربری و پوشش تمام حالت‌های مرزی قبل از تحویل\n"
-        "• تحویل سورس کد تمیز به همراه داکیومنت و راهنمای شفاف راه‌اندازی\n"
-        f"• زمان تحویل: {delivery_days} روز کاری به همراه پشتیبانی و اعمال بازخوردهای شما تا رضایت کامل"
+        f"{intro}\n\n"
+        "طرح کلی اجرا در ۳ گام کلان:\n"
+        f"گام اول: {step_one_tail}.\n"
+        f"گام دوم: {step_two_tail}.\n"
+        "گام سوم: آزمون نهایی، آماده‌سازی خروجی تمیز و تحویل شفاف.\n\n"
+        "کاهش ریسک و تضمین پایداری:\n"
+        "تعهد می‌دهم پیش از تحویل، تست کامل سناریوهای اصلی و حالت‌های مرزی را انجام دهم، "
+        "مستندات شفاف نحوه اجرا و استفاده از سیستم را تحویل دهم "
+        "و پشتیبانی اولیه برای رفع اشکال را بدون هزینه اضافه انجام دهم تا با خیال راحت تصمیم بگیرید.\n\n"
+        "اگر این چارچوب کلی مدنظر شماست، خوشحال می‌شم در چت گفتگو کنیم تا ساختار خروجی و زمان‌بندی رو دقیق‌تر هماهنگ کنیم.\n"
+        f"زمان تحویل: {delivery_days} روز کاری."
     )
-    return proposal.strip()
+    return _strip_code_blocks(proposal).strip()
 
 
 def _clean_llm_proposal(text: str) -> str | None:
     """Filter LLM proposal text, stripping sentences with banned cliches or returning None."""
+    if not text:
+        return None
+
+    text = _strip_code_blocks(text)
     if not text:
         return None
 
@@ -441,8 +489,11 @@ def _query_llm_proposal(
         "Rules:\n"
         "- Respond in professional, human Persian.\n"
         "- NO greetings or clichés (NEVER say 'سلام', 'امیدوارم حالتون خوب باشه', 'من با تجربه هستم').\n"
-        "- Start immediately with direct technical solution and architecture.\n"
-        "- Detail the roadmap, testing assurance, and delivery schedule.\n"
+        "- NEVER include raw code, code snippets, or markdown code blocks (no ``` fences, no inline code).\n"
+        "- Follow the 4-pillar persuasion blueprint: (1) pain-point empathy and business context, "
+        "(2) a clean 3-step high-level conceptual workflow with no low-level code, "
+        "(3) risk reversal with pre-delivery testing, clean usage docs, and free initial bug-fix support, "
+        "(4) a friendly low-pressure invitation to discuss output structure and timing in chat.\n"
         "- Under 300 words."
     )
 
@@ -611,10 +662,20 @@ def generate_architecture(
     proposal = _query_llm_proposal(
         project, scope, tech_stack, roadmap, delivery_days
     )
+    if proposal:
+        proposal = _strip_code_blocks(proposal)
     if not proposal:
         proposal = _build_rule_based_proposal(
             project, scope, tech_stack, roadmap, delivery_days
         )
+    else:
+        # Rule-based blueprint is the canonical persuasion structure; merge the
+        # LLM draft into it only when it adds no code and keeps the pillars.
+        proposal = _strip_code_blocks(proposal)
+        if "```" in proposal:
+            proposal = _build_rule_based_proposal(
+                project, scope, tech_stack, roadmap, delivery_days
+            )
 
     technical_hook = DEFAULT_TECHNICAL_HOOKS.get(scope, DEFAULT_TECHNICAL_HOOKS["scripting"])
 
@@ -626,6 +687,7 @@ def generate_architecture(
             avoid = []
         avoid_list = [str(p) for p in (avoid or []) if str(p).strip()]
         proposal = _enforce_tone_avoid(proposal, avoid_list)
+        proposal = _strip_code_blocks(proposal)
         technical_hook = _enforce_tone_avoid(str(technical_hook), avoid_list)
         currency = str(project.get("currency") or "IRT")
         suggested_bid = _align_bid_with_profile_rate(

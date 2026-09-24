@@ -51,7 +51,11 @@ _PERSIST_COLUMNS = (
     "win_probability",
     "difficulty",
     "pricing_strategy",
+    "client_risk",
+    "red_flags",
 )
+
+_RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 
 
 def _load_config_file(config_path: str | Path) -> dict[str, Any]:
@@ -185,6 +189,9 @@ class OmniHunterAgentAPI:
             pass
 
     def _triage_view(self, project: dict[str, Any]) -> dict[str, Any]:
+        red_flags = project.get("red_flags")
+        if not isinstance(red_flags, list):
+            red_flags = []
         return {
             "tier": project.get("tier"),
             "fit_score": project.get("fit_score"),
@@ -197,6 +204,8 @@ class OmniHunterAgentAPI:
             "win_probability": project.get("win_probability"),
             "difficulty": project.get("difficulty"),
             "pricing_strategy": project.get("pricing_strategy"),
+            "client_risk": project.get("client_risk") or "low",
+            "red_flags": red_flags,
         }
 
     # ------------------------------------------------------------------
@@ -210,6 +219,7 @@ class OmniHunterAgentAPI:
         platforms: list[str] | None = None,
         limit: int = 10,
         sort_by: str = "roi",
+        max_client_risk: str = "medium",
     ) -> list[dict[str, Any]]:
         """Scan platforms, triage, persist, and return the top N projects.
 
@@ -304,6 +314,15 @@ class OmniHunterAgentAPI:
             for p in candidates
             if not p.get("is_scam") and p.get("rejection_reason") != "scam_detected"
         ]
+
+        # Client-risk filtering: exclude projects riskier than max_client_risk.
+        risk_cap = _RISK_ORDER.get(str(max_client_risk or "medium").strip().lower(), 1)
+        filtered: list[dict[str, Any]] = []
+        for p in candidates:
+            risk = str(p.get("client_risk") or "low").strip().lower()
+            if _RISK_ORDER.get(risk, 0) <= risk_cap:
+                filtered.append(p)
+        candidates = filtered
 
         sort_field = _SORT_KEYS.get(str(sort_by or "roi").strip().lower(), "roi_score")
         candidates.sort(

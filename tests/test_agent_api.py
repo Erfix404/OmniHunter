@@ -217,8 +217,11 @@ def test_get_blueprint_returns_full_dossier(tmp_path):
         assert blueprint["pricing_breakdown"]["suggested_bid"] == blueprint["suggested_bid"]
         # Triage view carries the Phase-1 enrichment fields.
         for field in ("tier", "fit_score", "scope", "is_scam", "claude_leverage",
-                      "win_probability", "difficulty", "pricing_strategy"):
+                      "win_probability", "difficulty", "pricing_strategy",
+                      "client_risk", "red_flags"):
             assert field in dossier["triage"], field
+        assert dossier["triage"]["client_risk"] in ("low", "medium", "high")
+        assert isinstance(dossier["triage"]["red_flags"], list)
         # Works by integer id too.
         by_id = api.get_blueprint(dossier["project"]["id"])
         assert by_id["project"]["job_hash"] == BOT_PROJECT["job_hash"]
@@ -462,6 +465,40 @@ def test_main_dispatches_new_commands():
     with patch("interfaces.cli.run_fill") as m:
         assert main(["fill", "1"]) == 0
         m.assert_called_once()
+
+
+def test_hunt_max_client_risk_filtering(tmp_path):
+    risky = {
+        "platform": "ponisha",
+        "platform_id": "sdk_risk_1",
+        "job_hash": "ponisha_sdk_risk_1",
+        "title": "ساخت ربات تلگرام فروشگاهی با پایتون و aiogram",
+        "url": "https://ponisha.ir/project/sdk_risk_1",
+        "budget_min": 3000000,
+        "budget_max": 6000000,
+        "currency": "IRT",
+        "description": "ربات تلگرام با پایتون؛ پشتیبانی نامحدود و تسویه بعد از تست یک ماهه.",
+        "skills": ["Python", "Telegram Bot", "aiogram"],
+    }
+    api = _make_api(tmp_path)
+    try:
+        _patch_scrapers(api, {"ponisha": [BOT_PROJECT, risky]})
+        default_results = api.hunt(limit=10)
+        default_hashes = [p["job_hash"] for p in default_results]
+        assert BOT_PROJECT["job_hash"] in default_hashes
+        # 2 red flags -> high risk -> excluded by the default "medium" cap.
+        assert risky["job_hash"] not in default_hashes
+
+        inclusive = api.hunt(limit=10, max_client_risk="high")
+        inclusive_hashes = [p["job_hash"] for p in inclusive]
+        assert BOT_PROJECT["job_hash"] in inclusive_hashes
+        assert risky["job_hash"] in inclusive_hashes
+
+        risky_entry = next(p for p in inclusive if p["job_hash"] == risky["job_hash"])
+        assert risky_entry["client_risk"] == "high"
+        assert isinstance(risky_entry["red_flags"], list) and len(risky_entry["red_flags"]) >= 2
+    finally:
+        api.close()
 
 
 def test_skill_files_exist():

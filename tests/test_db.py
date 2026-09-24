@@ -386,7 +386,7 @@ def test_schema_migration_adds_new_columns(tmp_path):
     col_names = {row[1] for row in cursor.fetchall()}
     for expected_col in ["claude_leverage", "win_probability", "difficulty",
                          "pricing_strategy", "prerequisites", "technical_hook",
-                         "clarifying_question"]:
+                         "clarifying_question", "client_risk", "red_flags"]:
         assert expected_col in col_names, f"Migration failed to add column: {expected_col}"
 
     # Verify can save with new fields
@@ -400,5 +400,54 @@ def test_schema_migration_adds_new_columns(tmp_path):
     fetched = db.get_project("h_migrated")
     assert fetched["claude_leverage"] == 8
     assert fetched["win_probability"] == 0.50
+
+
+def test_client_risk_columns_save_and_retrieve(tmp_path):
+    """client_risk and red_flags persist as scalar + JSON list."""
+    db_file = tmp_path / "test_risk.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    project = {
+        "job_hash": "h_risk_1",
+        "title": "Risky Project",
+        "client_risk": "high",
+        "red_flags": ["پشتیبانی نامحدود", "تسویه بعد از تست یک ماهه"],
+    }
+    assert db.save_project(project) is True
+
+    fetched = db.get_project("h_risk_1")
+    assert fetched is not None
+    assert fetched["client_risk"] == "high"
+    assert fetched["red_flags"] == ["پشتیبانی نامحدود", "تسویه بعد از تست یک ماهه"]
+    assert isinstance(fetched["red_flags"], list)
+
+    # Projects without risk data default to an empty red-flag list.
+    assert db.save_project({"job_hash": "h_risk_2", "title": "Clean"}) is True
+    clean = db.get_project("h_risk_2")
+    assert clean["red_flags"] == []
+
+
+def test_client_risk_columns_in_create_table_and_list(tmp_path):
+    """Fresh schema carries the risk columns and they surface in list_projects."""
+    db_file = tmp_path / "test_risk_list.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    cursor = db.conn.execute("PRAGMA table_info(projects)")
+    col_names = {row[1] for row in cursor.fetchall()}
+    assert "client_risk" in col_names
+    assert "red_flags" in col_names
+
+    db.save_project({
+        "job_hash": "h_risk_list",
+        "title": "Listed Risk",
+        "client_risk": "medium",
+        "red_flags": ["unlimited support"],
+    })
+    projects = db.list_projects()
+    assert len(projects) == 1
+    assert projects[0]["client_risk"] == "medium"
+    assert projects[0]["red_flags"] == ["unlimited support"]
 
 

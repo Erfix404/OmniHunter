@@ -1,8 +1,14 @@
 import pytest
-from core.triage import evaluate_project
+from core.triage import (
+    DEFAULT_RED_FLAGS,
+    assess_client_risk,
+    detect_red_flags,
+    evaluate_project,
+    normalize_text,
+)
 
 
-NEW_FIELDS = {"claude_leverage", "difficulty", "difficulty_score", "win_probability", "pricing_strategy"}
+NEW_FIELDS = {"claude_leverage", "difficulty", "difficulty_score", "win_probability", "pricing_strategy", "client_risk", "red_flags"}
 
 
 def _assert_new_fields_present(res: dict) -> None:
@@ -548,4 +554,89 @@ def test_new_fields_in_all_return_paths():
         {},
     )
     _assert_new_fields_present(res5)
+
+
+def _bots_project(**overrides):
+    base = {
+        "title": "ساخت ربات تلگرام ووکامرس",
+        "description": "پایتون و تلگرام برای فروشگاه",
+        "budget_min": 2500000,
+        "currency": "IRT",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_red_flags_list_covers_toxic_phrases():
+    for phrase in [
+        "تست رایگان", "نمونه رایگان", "پروژه تستی رایگان",
+        "free test", "free sample",
+        "کار دو ساعته", "two hour job", "very easy job",
+        "پشتیبانی نامحدود", "unlimited support",
+        "تغییرات مکرر", "تغییرات بعد از تحویل",
+        "ارزان ترین قیمت", "lowest budget", "cheapest",
+        "تسویه بعد از تست یک ماهه",
+    ]:
+        assert phrase in DEFAULT_RED_FLAGS, f"Missing red flag: {phrase}"
+
+
+def test_red_flag_detection_single_phrase_medium_risk():
+    proj = _bots_project(description="ربات تلگرام با پایتون، پشتیبانی نامحدود می‌خواهم")
+    res = evaluate_project(proj, {})
+    assert res["red_flags"] == ["پشتیبانی نامحدود"]
+    assert res["client_risk"] == "medium"
+
+
+def test_red_flag_detection_english_phrase():
+    proj = _bots_project(description="Telegram bot with python, need unlimited support please")
+    res = evaluate_project(proj, {})
+    assert "unlimited support" in res["red_flags"]
+    assert res["client_risk"] == "medium"
+
+
+def test_client_risk_low_when_clean():
+    res = evaluate_project(_bots_project(), {})
+    assert res["red_flags"] == []
+    assert res["client_risk"] == "low"
+
+
+def test_client_risk_high_with_two_flags_downgrades_tier():
+    proj = _bots_project(
+        description="ربات تلگرام با پشتیبانی نامحدود و تسویه بعد از تست یک ماهه",
+    )
+    res = evaluate_project(proj, {})
+    assert len(res["red_flags"]) >= 2
+    assert res["client_risk"] == "high"
+    # Would-be Tier A is downgraded away from A on high risk.
+    assert res["tier"] in ("B", "C")
+    assert assess_client_risk(res["red_flags"]) == "high"
+
+
+def test_detect_red_flags_helper_and_assess():
+    flags = detect_red_flags(
+        normalize_text("ربات تلگرام"),
+        normalize_text("کار دو ساعته و خیلی راحته"),
+    )
+    assert "کار دو ساعته" in flags
+    assert "خیلی راحته" in flags
+    assert assess_client_risk([]) == "low"
+    assert assess_client_risk(["x"]) == "medium"
+    assert assess_client_risk(["x", "y"]) == "high"
+
+
+def test_risk_fields_present_in_all_return_paths():
+    # Non-dict, no-scope, budget-below-minimum, and scam paths all carry risk fields.
+    for res in [
+        evaluate_project("not a dict", {}),
+        evaluate_project({"title": "طراحی لوگو", "description": "گرافیک"}, {}),
+        evaluate_project(
+            {"title": "ربات تلگرام حرفه‌ای", "description": "ربات با aiogram",
+             "budget_max": 800000, "currency": "IRT"}, {},
+        ),
+        evaluate_project({"title": "x", "description": "پرداخت اول"}, {}),
+    ]:
+        assert "client_risk" in res
+        assert "red_flags" in res
+        assert res["client_risk"] in ("low", "medium", "high")
+        assert isinstance(res["red_flags"], list)
 
