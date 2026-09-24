@@ -9,4 +9,6 @@ reports/*.md
 *.log
 .env
 .coverage
+.venv/
+.phase*
 

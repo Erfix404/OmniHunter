@@ -4,6 +4,8 @@ from typing import Any
 from core.form_filler.base_filler import BaseFormFiller
 from core.form_filler.ponisha_filler import PonishaFormFiller
 from core.form_filler.parscoders_filler import ParscodersFormFiller
+from core.form_filler.karlancer_filler import KarlancerFormFiller
+from core.form_filler.kaya_filler import KayaFormFiller
 
 # ponytail: static factory mapping over dynamic plug-in registration; upgrade to entry_points if adding 3rd party plugins.
 
@@ -15,6 +17,10 @@ def get_form_filler(platform: str) -> BaseFormFiller:
         return PonishaFormFiller()
     elif norm == "parscoders":
         return ParscodersFormFiller()
+    elif norm == "karlancer":
+        return KarlancerFormFiller()
+    elif norm == "kaya":
+        return KayaFormFiller()
     else:
         raise ValueError(f"Unsupported form filler platform: '{platform}'")
 
@@ -78,7 +84,8 @@ __all__ = [
     "BaseFormFiller",
     "PonishaFormFiller",
     "ParscodersFormFiller",
+    "KarlancerFormFiller",
+    "KayaFormFiller",
     "get_form_filler",
     "fill_application",
 ]
-

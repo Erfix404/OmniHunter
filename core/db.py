@@ -29,6 +29,13 @@ class DB:
         "proposal",
         "rejection_reason",
         "skills",
+        "claude_leverage",
+        "win_probability",
+        "difficulty",
+        "pricing_strategy",
+        "prerequisites",
+        "technical_hook",
+        "clarifying_question",
     }
 
     APPLICATION_COLUMNS = {
@@ -76,6 +83,13 @@ class DB:
                 proposal TEXT,
                 rejection_reason TEXT,
                 skills TEXT,
+                claude_leverage INTEGER,
+                win_probability REAL,
+                difficulty TEXT,
+                pricing_strategy TEXT,
+                prerequisites TEXT,
+                technical_hook TEXT,
+                clarifying_question TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -91,11 +105,6 @@ class DB:
                 submitted_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-
-            CREATE INDEX IF NOT EXISTS idx_projects_job_hash ON projects(job_hash);
-            CREATE INDEX IF NOT EXISTS idx_projects_tier ON projects(tier);
-            CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-            CREATE INDEX IF NOT EXISTS idx_applications_project_id ON applications(project_id);
             """
         )
         self.conn.commit()
@@ -104,6 +113,39 @@ class DB:
             self.conn.commit()
         except sqlite3.OperationalError:
             pass
+        # Migration for existing databases: add new Phase 1 fields
+        new_columns = {
+            "claude_leverage": "INTEGER",
+            "win_probability": "REAL",
+            "difficulty": "TEXT",
+            "pricing_strategy": "TEXT",
+            "prerequisites": "TEXT",
+            "technical_hook": "TEXT",
+            "clarifying_question": "TEXT",
+        }
+        cursor = self.conn.execute("PRAGMA table_info(projects)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        for col_name, col_type in new_columns.items():
+            if col_name not in existing_cols:
+                try:
+                    self.conn.execute(
+                        f"ALTER TABLE projects ADD COLUMN {col_name} {col_type};"
+                    )
+                    self.conn.commit()
+                except sqlite3.OperationalError:
+                    pass
+        # Create indexes after all columns exist (safe for pre-existing and new schemas)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_projects_job_hash ON projects(job_hash);",
+            "CREATE INDEX IF NOT EXISTS idx_projects_tier ON projects(tier);",
+            "CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);",
+            "CREATE INDEX IF NOT EXISTS idx_applications_project_id ON applications(project_id);",
+        ]:
+            try:
+                self.conn.execute(idx_sql)
+            except sqlite3.OperationalError:
+                pass
+        self.conn.commit()
 
     def save_project(self, proj_dict: dict[str, Any]) -> bool:
         """Save a new project to the database.
@@ -262,7 +304,7 @@ class DB:
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """Convert a sqlite3.Row to a dictionary, unpacking JSON fields."""
         d = dict(row)
-        for field in ("tech_stack", "roadmap", "skills"):
+        for field in ("tech_stack", "roadmap", "skills", "prerequisites"):
             val = d.get(field)
             if isinstance(val, str) and val.startswith(("[", "{")):
                 try:

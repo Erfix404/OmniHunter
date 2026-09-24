@@ -1,8 +1,34 @@
 import re
 from typing import Any
 
+
+def _resolve_triage_profile(profile: Any | None) -> Any | None:
+    """Lazily resolve a profile object without hard-importing core.profile."""
+    if profile is None:
+        return None
+    if hasattr(profile, "is_scope_declined") and hasattr(profile, "get_min_budget"):
+        return profile
+    if isinstance(profile, dict):
+        try:
+            from core.profile import FreelancerProfile
+
+            return FreelancerProfile(data=profile)
+        except Exception:
+            return None
+    return None
+
 # ponytail: heuristic keyword scoring over LLM classifier; ceiling ~90% accuracy on ambiguous briefs, upgrade to Claude Haiku/Sonnet triage when budget allows.
 # ponytail: static baseline hours per scope over task breakdown estimation; upgrade to LLM scope estimator when multi-feature tasks are scanned.
+
+# Claude leverage tiers by scope: how much Claude accelerates delivery
+CLAUDE_LEVERAGE: dict[str, int] = {
+    "bots": 9,        # aiogram, telethon, pyrogram — high Claude leverage
+    "automation": 9,  # webhooks, n8n scripting, bots
+    "scraping": 9,    # playwright, beautifulsoup — high Claude leverage
+    "scripting": 9,   # fastapi, sqlite, python APIs
+    "excel": 7,       # pandas, openpyxl — general python
+    "translation": 5, # text work, less code-centric
+}
 
 DEFAULT_SCAM_BLACKLIST: list[str] = [
     "بیعانه",
@@ -217,9 +243,49 @@ def _calculate_scope_fit(
     return round(min(1.0, max(0.0, raw_score)), 2)
 
 
+def _compute_win_probability(fit_score: float, project: dict[str, Any]) -> float:
+    """Calculate win probability based on fit score and competition level."""
+    proposals_count = project.get("proposals_count") or project.get("bid_count")
+    if proposals_count is None:
+        proposals_count = 5
+    else:
+        try:
+            proposals_count = int(proposals_count)
+        except (ValueError, TypeError):
+            proposals_count = 5
+    competition_penalty = min(0.6, proposals_count * 0.025)
+    raw = fit_score * (1.0 - competition_penalty)
+    return round(max(0.10, min(0.95, raw)), 2)
+
+
+def _compute_difficulty(fit_score: float, estimated_hours: float | None) -> tuple[str, int]:
+    """Return (difficulty_label, difficulty_score) based on fit and hours."""
+    hours = estimated_hours or 0.0
+    if fit_score >= 0.7 and hours <= 4:
+        return "آسان", 1
+    elif hours > 8 or fit_score < 0.4:
+        return "پیچیده", 5
+    elif 4 < hours <= 8:
+        return "متوسط", 3
+    else:
+        # hours <= 4 but fit_score < 0.7 and >= 0.4
+        return "متوسط", 3
+
+
+def _compute_pricing_strategy(win_probability: float) -> str:
+    """Determine pricing strategy from win probability."""
+    if win_probability < 0.4:
+        return "competitive_entry"
+    elif win_probability > 0.75:
+        return "value_driven"
+    else:
+        return "sweet_spot"
+
+
 def evaluate_project(
     project: dict[str, Any],
     config: dict[str, Any] | None = None,
+    profile: Any | None = None,
 ) -> dict[str, Any]:
     """Evaluate a project for scam patterns, scope alignment, and ROI.
 
@@ -243,6 +309,11 @@ def evaluate_project(
             "rejection_reason": "no_scope_match",
             "estimated_hours": None,
             "roi_score": None,
+            "claude_leverage": 1,
+            "difficulty": "پیچیده",
+            "difficulty_score": 5,
+            "win_probability": 0.10,
+            "pricing_strategy": "competitive_entry",
         }
 
     cfg = config or {}
@@ -276,6 +347,11 @@ def evaluate_project(
                 "rejection_reason": "scam_detected",
                 "estimated_hours": None,
                 "roi_score": None,
+                "claude_leverage": 1,
+                "difficulty": "پیچیده",
+                "difficulty_score": 5,
+                "win_probability": 0.10,
+                "pricing_strategy": "competitive_entry",
             }
 
     # 3. Scope Matching
@@ -311,6 +387,11 @@ def evaluate_project(
             "rejection_reason": "no_scope_match",
             "estimated_hours": None,
             "roi_score": None,
+            "claude_leverage": 1,
+            "difficulty": "پیچیده",
+            "difficulty_score": 5,
+            "win_probability": 0.10,
+            "pricing_strategy": "competitive_entry",
         }
 
     # 4. Budget & Floor Verification
@@ -334,6 +415,38 @@ def evaluate_project(
         )
         min_budget = float(scope_cfg.get("min_budget_irt", default_irt))
 
+    # Profile personal floor: the profile's minimum acts as a custom floor
+    # only when it is specified and higher than the scope floor.
+    _prof = _resolve_triage_profile(profile)
+    if _prof is not None:
+        try:
+            profile_floor = _prof.get_min_budget(currency)
+        except Exception:
+            profile_floor = None
+        if profile_floor is not None and profile_floor > min_budget:
+            min_budget = float(profile_floor)
+
+        if _prof.is_scope_declined(best_scope):
+            _cl = CLAUDE_LEVERAGE.get(best_scope, 5)
+            _wp = _compute_win_probability(best_score, project)
+            _est = DEFAULT_ESTIMATED_HOURS.get(best_scope, 4.0)
+            _diff, _ds = _compute_difficulty(best_score, _est)
+            _ps = _compute_pricing_strategy(_wp)
+            return {
+                "tier": "C",
+                "fit_score": best_score,
+                "scope": best_scope,
+                "is_scam": False,
+                "rejection_reason": "scope_declined_by_profile",
+                "estimated_hours": _est,
+                "roi_score": None,
+                "claude_leverage": _cl,
+                "difficulty": _diff,
+                "difficulty_score": _ds,
+                "win_probability": _wp,
+                "pricing_strategy": _ps,
+            }
+
     b_min = _parse_budget_val(project.get("budget_min"))
     b_max = _parse_budget_val(project.get("budget_max"))
 
@@ -355,6 +468,10 @@ def evaluate_project(
 
     # Budget below minimum rejection
     if effective_budget is not None and effective_budget < min_budget:
+        _cl = CLAUDE_LEVERAGE.get(best_scope, 5)
+        _wp = _compute_win_probability(best_score, project)
+        _diff, _ds = _compute_difficulty(best_score, estimated_hours)
+        _ps = _compute_pricing_strategy(_wp)
         return {
             "tier": "C",
             "fit_score": best_score,
@@ -363,6 +480,11 @@ def evaluate_project(
             "rejection_reason": "budget_below_minimum",
             "estimated_hours": estimated_hours,
             "roi_score": roi_score,
+            "claude_leverage": _cl,
+            "difficulty": _diff,
+            "difficulty_score": _ds,
+            "win_probability": _wp,
+            "pricing_strategy": _ps,
         }
 
     # 5. Tier Assignment
@@ -376,6 +498,12 @@ def evaluate_project(
         tier = "B"
         rejection_reason = None
 
+    # 6. New enrichment fields
+    claude_leverage = CLAUDE_LEVERAGE.get(best_scope, 5)
+    win_probability = _compute_win_probability(best_score, project)
+    difficulty, difficulty_score = _compute_difficulty(best_score, estimated_hours)
+    pricing_strategy = _compute_pricing_strategy(win_probability)
+
     return {
         "tier": tier,
         "fit_score": best_score,
@@ -384,6 +512,11 @@ def evaluate_project(
         "rejection_reason": rejection_reason,
         "estimated_hours": estimated_hours,
         "roi_score": roi_score,
+        "claude_leverage": claude_leverage,
+        "difficulty": difficulty,
+        "difficulty_score": difficulty_score,
+        "win_probability": win_probability,
+        "pricing_strategy": pricing_strategy,
     }
 
 

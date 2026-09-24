@@ -262,3 +262,143 @@ def test_get_projects_by_date(tmp_path):
     assert past_projects == []
 
 
+def test_new_columns_save_and_retrieve(tmp_path):
+    """Phase 1 enrichment columns are stored and retrieved correctly."""
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    project = {
+        "job_hash": "h_phase1",
+        "title": "Bot Project",
+        "scope": "bots",
+        "tier": "A",
+        "fit_score": 0.90,
+        "claude_leverage": 9,
+        "win_probability": 0.78,
+        "difficulty": "متوسط",
+        "pricing_strategy": "value_driven",
+        "prerequisites": ["توکن ربات", "نمونه جریان تعامل"],
+        "technical_hook": "معماری ربات بر پایه aiogram طراحی می‌شود.",
+        "clarifying_question": "آیا ربات نیاز به مدیریت نشست‌ها دارد؟",
+    }
+    assert db.save_project(project) is True
+
+    fetched = db.get_project("h_phase1")
+    assert fetched is not None
+    assert fetched["claude_leverage"] == 9
+    assert fetched["win_probability"] == 0.78
+    assert fetched["difficulty"] == "متوسط"
+    assert fetched["pricing_strategy"] == "value_driven"
+    assert fetched["prerequisites"] == ["توکن ربات", "نمونه جریان تعامل"]
+    assert fetched["technical_hook"] == "معماری ربات بر پایه aiogram طراحی می‌شود."
+    assert fetched["clarifying_question"] == "آیا ربات نیاز به مدیریت نشست‌ها دارد؟"
+
+
+def test_new_columns_in_list_projects(tmp_path):
+    """New columns appear in list_projects results."""
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    project = {
+        "job_hash": "h_list_phase1",
+        "title": "Scraping Project",
+        "tier": "A",
+        "claude_leverage": 9,
+        "win_probability": 0.65,
+        "difficulty": "آسان",
+        "pricing_strategy": "sweet_spot",
+        "technical_hook": "خزنده مبتنی بر Playwright.",
+        "clarifying_question": "سایت SPA است؟",
+        "prerequisites": ["URL هدف"],
+    }
+    db.save_project(project)
+
+    projects = db.list_projects(tier="A")
+    assert len(projects) == 1
+    p = projects[0]
+    assert p["claude_leverage"] == 9
+    assert p["win_probability"] == 0.65
+    assert p["difficulty"] == "آسان"
+    assert p["pricing_strategy"] == "sweet_spot"
+    assert p["technical_hook"] == "خزنده مبتنی بر Playwright."
+
+
+def test_new_columns_in_get_projects_by_date(tmp_path):
+    """New columns appear in get_projects_by_date results."""
+    db_file = tmp_path / "test_hunter.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    project = {
+        "job_hash": "h_date_phase1",
+        "title": "Excel Project",
+        "claude_leverage": 7,
+        "win_probability": 0.55,
+        "difficulty": "آسان",
+        "pricing_strategy": "sweet_spot",
+    }
+    db.save_project(project)
+
+    today_projects = db.get_projects_by_date()
+    assert len(today_projects) == 1
+    p = today_projects[0]
+    assert p["claude_leverage"] == 7
+    assert p["win_probability"] == 0.55
+
+
+def test_schema_migration_adds_new_columns(tmp_path):
+    """Calling init_schema on a pre-existing DB without new columns adds them."""
+    import sqlite3
+
+    db_file = tmp_path / "test_migration.db"
+
+    # Create old schema without new columns
+    conn = sqlite3.connect(str(db_file))
+    conn.execute("""
+        CREATE TABLE projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_hash TEXT UNIQUE NOT NULL,
+            title TEXT,
+            skills TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    # Now open with DB and init_schema — should add missing columns
+    db = DB(str(db_file))
+    db.init_schema()
+
+    # Verify new columns exist
+    cursor = db.conn.execute("PRAGMA table_info(projects)")
+    col_names = {row[1] for row in cursor.fetchall()}
+    for expected_col in ["claude_leverage", "win_probability", "difficulty",
+                         "pricing_strategy", "prerequisites", "technical_hook",
+                         "clarifying_question"]:
+        assert expected_col in col_names, f"Migration failed to add column: {expected_col}"
+
+    # Verify can save with new fields
+    project = {
+        "job_hash": "h_migrated",
+        "title": "Migrated Project",
+        "claude_leverage": 8,
+        "win_probability": 0.50,
+    }
+    assert db.save_project(project) is True
+    fetched = db.get_project("h_migrated")
+    assert fetched["claude_leverage"] == 8
+    assert fetched["win_probability"] == 0.50
+
+

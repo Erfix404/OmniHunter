@@ -92,6 +92,36 @@ BANNED_CLICHES: list[str] = [
     "hope you are doing well",
 ]
 
+# Scope-specific technical hooks (direct, no clichés)
+DEFAULT_TECHNICAL_HOOKS: dict[str, str] = {
+    "bots": "معماری ربات بر پایه aiogram 3.x با FSM و مدیریت نشست‌ها طراحی می‌شود تا پایداری و مقیاس‌پذیری در بار بالا تضمین گردد.",
+    "automation": "پایپلاین اتوماسیون با وب‌هوک‌های n8n و اسکریپت‌های پایتون طراحی می‌شود تا جریان داده بدون افت یا خطا پردازش شود.",
+    "translation": "ترجمه تخصصی بر اساس واژه‌نامه یکپارچه حوزه مربوطه انجام می‌شود تا یکدستی اصطلاحات در کل متن حفظ گردد.",
+    "excel": "پردازش داده‌ها با ترکیب فرمول‌های پیشرفته اکسل و اسکریپت‌های pandas/openpyxl اتوماسیون می‌شود.",
+    "scraping": "خزنده مبتنی بر Playwright با مدیریت ریت‌لیمیت و دور زدن محدودیت‌های anti-bot طراحی می‌شود.",
+    "scripting": "ساختار ماژولار با FastAPI و Type Hinting کامل پیاده‌سازی می‌شود تا نگهداری و توسعه‌پذیری بلندمدت تضمین گردد.",
+}
+
+# Scope-specific prerequisites
+DEFAULT_PREREQUISITES: dict[str, list[str]] = {
+    "bots": ["توکن ربات (Bot Token) از BotFather", "نمونه جریان تعامل کاربران", "مشخصات درگاه پرداخت (در صورت نیاز)"],
+    "automation": ["اندپوینت‌های API مبدا و مقصد", "نمونه داده ورودی/خروجی", "اطلاعات احراز هویت سرویس‌ها"],
+    "translation": ["فایل‌های متن اصلی", "واژه‌نامه تخصصی حوزه (در صورت وجود)", "فرمت خروجی مورد نظر"],
+    "excel": ["فایل‌های اکسل نمونه", "توضیح ساختار داده‌ها و ستون‌ها", "خروجی مورد انتظار"],
+    "scraping": ["آدرس URL صفحات هدف", "نمونه داده‌های مورد نیاز", "فرمت خروجی (CSV/JSON/Excel)"],
+    "scripting": ["مشخصات API و اندپوینت‌ها", "نمونه داده ورودی", "اطلاعات دسترسی سرور/دیتابیس"],
+}
+
+# Scope-specific clarifying questions
+DEFAULT_CLARIFYING_QUESTIONS: dict[str, str] = {
+    "bots": "آیا ربات نیاز به مدیریت نشست‌های همزمان چند کاربره و ذخیره‌سازی وضعیت (State) دارد؟",
+    "automation": "حجم تقریبی درخواست‌ها در ساعت و سیاست بازتلاش (Retry) مورد نظر چگونه است؟",
+    "translation": "آیا واژه‌نامه تخصصی از قبل تدوین شده یا باید در فاز اول پروژه استخراج شود؟",
+    "excel": "آیا فرمول‌ها باید در خود فایل اکسل باشند یا پردازش با اسکریپت پایتون خارجی هم قابل قبول است؟",
+    "scraping": "آیا سایت هدف از رندرینگ جاوااسکریپت (SPA) استفاده می‌کند یا محتوا در HTML استاتیک موجود است؟",
+    "scripting": "آیا خروجی نهایی باید به صورت REST API باشد یا اسکریپت CLI کافی است؟",
+}
+
 
 def _parse_num(val: Any) -> float | None:
     if val is None or val == "":
@@ -214,6 +244,76 @@ def _calculate_pricing(
         delivery_days = baseline_days
 
     return suggested_bid, max(1, min(5, delivery_days))
+
+
+def _resolve_architect_profile(profile: Any | None) -> Any | None:
+    """Lazily resolve a profile object without hard-importing core.profile."""
+    if profile is None:
+        return None
+    if (
+        hasattr(profile, "get_relevant_portfolio")
+        and hasattr(profile, "get_relevant_evidence")
+        and hasattr(profile, "tone")
+    ):
+        return profile
+    if isinstance(profile, dict):
+        try:
+            from core.profile import FreelancerProfile
+
+            return FreelancerProfile(data=profile)
+        except Exception:
+            return None
+    return None
+
+
+def _estimate_hours_for_bid(scope: str, tech_stack: list[str]) -> float:
+    try:
+        from core.triage import DEFAULT_ESTIMATED_HOURS
+
+        return float(DEFAULT_ESTIMATED_HOURS.get(scope, 4.0))
+    except Exception:
+        return 4.0
+
+
+def _align_bid_with_profile_rate(
+    suggested_bid: int | float,
+    scope: str,
+    currency: str,
+    tech_stack: list[str],
+    profile: Any | None,
+) -> int | float:
+    """Align ``suggested_bid`` with the profile hourly rate when available."""
+    cur = str(currency or "IRT").strip().upper()
+    is_usd = cur in ("USD", "$")
+    is_irr = cur in ("IRR", "RIAL", "RIALS")
+    try:
+        ident = profile.identity
+        if not isinstance(ident, dict):
+            return suggested_bid
+        hourly = ident.get("hourly_rate_usd") if is_usd else ident.get("hourly_rate_irt")
+        if hourly is None:
+            return suggested_bid
+        hourly_rate = float(hourly)
+    except (ValueError, TypeError, AttributeError):
+        return suggested_bid
+    if hourly_rate <= 0:
+        return suggested_bid
+
+    hours = _estimate_hours_for_bid(scope, tech_stack)
+    rate_based = hourly_rate * hours
+    if is_irr:
+        rate_based *= 10
+    floor = suggested_bid if isinstance(suggested_bid, (int, float)) else 0
+    try:
+        floor_f = float(floor)
+    except (ValueError, TypeError):
+        floor_f = 0.0
+    target = max(rate_based, floor_f)
+    if is_usd:
+        return max(5, int(round(target / 5.0) * 5))
+    if is_irr:
+        return max(100000, int(round(target / 500000.0) * 500000))
+    return max(50000, int(round(target / 50000.0) * 50000))
 
 
 def _build_rule_based_proposal(
@@ -406,8 +506,81 @@ def _query_llm_proposal(
     return None
 
 
+def _enforce_tone_avoid(text: str, avoid_phrases: list[str]) -> str:
+    """Remove sentences/lines containing banned tone phrases (case-insensitive)."""
+    if not text or not avoid_phrases:
+        return text
+    banned = [str(p).strip().lower() for p in avoid_phrases if str(p).strip()]
+    if not banned:
+        return text
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        low = line.lower()
+        if not any(b in low for b in banned):
+            out_lines.append(line)
+            continue
+        sentences = re.split(r"(?<=[.!؟?\n])\s+", line)
+        kept = [
+            s.strip()
+            for s in sentences
+            if s.strip() and not any(b in s.lower() for b in banned)
+        ]
+        if kept:
+            out_lines.append(" ".join(kept))
+    cleaned = "\n".join(out_lines).strip()
+    for b in banned:
+        if b and b in cleaned.lower():
+            # Last-resort: blank the residual phrase occurrences rather than
+            # shipping a banned phrase.
+            cleaned = re.sub(re.escape(b), "", cleaned, flags=re.IGNORECASE)
+    return " ".join(cleaned.split())
+
+
+def _inject_profile_evidence(
+    proposal: str, scope: str, profile: Any | None
+) -> str:
+    """Append 1-2 relevant portfolio results or skill evidence to the proposal."""
+    if profile is None:
+        return proposal
+    snippets: list[str] = []
+    try:
+        portfolio_items = profile.get_relevant_portfolio(scope) or []
+    except Exception:
+        portfolio_items = []
+    for item in portfolio_items[:2]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        result = str(item.get("result", "")).strip()
+        if title and result:
+            snippets.append(f"نمونه‌کار مرتبط «{title}»: {result}")
+        elif result:
+            snippets.append(f"نمونه‌کار مرتبط: {result}")
+        elif title:
+            snippets.append(f"نمونه‌کار مرتبط: {title}")
+    try:
+        evidence = profile.get_relevant_evidence(scope) or []
+    except Exception:
+        evidence = []
+    for ev in evidence:
+        if len(snippets) >= 2:
+            break
+        ev_str = str(ev).strip()
+        if ev_str and ev_str not in snippets:
+            snippets.append(ev_str)
+    if not snippets:
+        return proposal
+    evidence_block = "\n".join(f"• {s}" for s in snippets[:2])
+    return (
+        f"{proposal.rstrip()}\n\n"
+        "سوابق مرتبط:\n"
+        f"{evidence_block}"
+    ).strip()
+
+
 def generate_architecture(
-    project: dict[str, Any], config: dict[str, Any] | None = None
+    project: dict[str, Any], config: dict[str, Any] | None = None,
+    profile: Any | None = None,
 ) -> dict[str, Any]:
     """Generate architecture specification, roadmap, pricing, and proposal.
 
@@ -432,6 +605,7 @@ def generate_architecture(
     suggested_bid, delivery_days = _calculate_pricing(project, scope)
     tech_stack = _detect_tech_stack(project, scope)
     roadmap = list(ROADMAPS.get(scope, ROADMAPS["scripting"]))
+    prof = _resolve_architect_profile(profile)
 
     # Try optional LLM proposal first if configured, else rule-based
     proposal = _query_llm_proposal(
@@ -442,12 +616,31 @@ def generate_architecture(
             project, scope, tech_stack, roadmap, delivery_days
         )
 
+    technical_hook = DEFAULT_TECHNICAL_HOOKS.get(scope, DEFAULT_TECHNICAL_HOOKS["scripting"])
+
+    if prof is not None:
+        proposal = _inject_profile_evidence(proposal, scope, prof)
+        try:
+            avoid = prof.tone.get("avoid", []) if isinstance(prof.tone, dict) else []
+        except Exception:
+            avoid = []
+        avoid_list = [str(p) for p in (avoid or []) if str(p).strip()]
+        proposal = _enforce_tone_avoid(proposal, avoid_list)
+        technical_hook = _enforce_tone_avoid(str(technical_hook), avoid_list)
+        currency = str(project.get("currency") or "IRT")
+        suggested_bid = _align_bid_with_profile_rate(
+            suggested_bid, scope, currency, tech_stack, prof
+        )
+
     return {
         "suggested_bid": suggested_bid,
         "delivery_days": delivery_days,
         "tech_stack": tech_stack,
         "roadmap": roadmap,
         "proposal": proposal,
+        "technical_hook": technical_hook,
+        "prerequisites": list(DEFAULT_PREREQUISITES.get(scope, DEFAULT_PREREQUISITES["scripting"])),
+        "clarifying_question": DEFAULT_CLARIFYING_QUESTIONS.get(scope, DEFAULT_CLARIFYING_QUESTIONS["scripting"]),
     }
 
 

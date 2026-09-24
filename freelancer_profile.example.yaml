@@ -1,0 +1,57 @@
+# Freelancer profile for Erfan Ashouri — copy to freelancer_profile.yaml and customize.
+identity:
+  name: "Erfan Ashouri"
+  hourly_rate_irt: 1200000
+  hourly_rate_usd: 25
+  min_project_irt: 2000000
+  min_project_usd: 30
+
+skills:
+  - name: "Python"
+    level: "expert"
+    tools: ["Python 3.12", "FastAPI", "SQLite", "Docker"]
+    evidence: "5+ years building production Python services with FastAPI and SQLite"
+    scopes: ["scripting", "automation", "bots", "scraping"]
+  - name: "Telegram/Bale bots via aiogram"
+    level: "expert"
+    tools: ["aiogram 3.x", "python-telegram-bot", "Bale Bot API", "Redis", "SQLite"]
+    evidence: "Shipped Cafe Mehras cafe-ordering bot handling concurrent FSM sessions with aiogram 3.x"
+    scopes: ["bots"]
+  - name: "Web Scraping with Playwright"
+    level: "advanced"
+    tools: ["Playwright", "BeautifulSoup4", "aiohttp", "pandas"]
+    evidence: "Built TeleRich Playwright crawler extracting 50k+ records with anti-bot and rate-limit handling"
+    scopes: ["scraping"]
+  - name: "Process Automation with n8n/FastAPI"
+    level: "advanced"
+    tools: ["n8n", "Webhooks", "FastAPI", "REST APIs", "Cron"]
+    evidence: "Automated Tarjoman order pipeline with n8n webhooks and FastAPI, cutting manual work by 80%"
+    scopes: ["automation", "scripting"]
+
+portfolio:
+  - title: "Cafe Mehras"
+    scope: "bots"
+    result: "Telegram ordering bot serving 2k+ monthly orders with 99% uptime on aiogram FSM"
+    url: "https://github.com/erfix/cafe-mehras-bot"
+  - title: "Tarjoman"
+    scope: "automation"
+    result: "n8n + FastAPI order pipeline that cut manual processing time by 80%"
+    url: "https://github.com/erfix/tarjoman-pipeline"
+  - title: "TeleRich"
+    scope: "scraping"
+    result: "Playwright crawler extracting 50k+ records into clean CSV/JSON datasets"
+    url: "https://github.com/erfix/telerich-scraper"
+
+tone:
+  style: "direct, technical, Persian, no greetings; start with the solution architecture"
+  avoid:
+    - "سلام و احترام"
+    - "امیدوارم حالتون خوب باشه"
+    - "با سلام و احترام"
+    - "امیدوارم روز خوبی داشته باشید"
+    - "من یک برنامه نویس با تجربه هستم"
+
+scopes:
+  preferred: ["bots", "scraping", "automation", "scripting"]
+  willing: ["excel"]
+  declined: ["translation", "formatting"]

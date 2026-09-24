@@ -86,9 +86,23 @@ class BaseFormFiller:
         dry_run: bool = True,
         headless: bool = False,
         prompt_fn: Any = None,
+        mode: str = "isolated",
+        confirm_submit: bool = False,
+        cdp_url: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Open project in browser, populate bid parameters, and handle dry-run or submit."""
+        """Open project in browser, populate bid parameters, and handle dry-run or submit.
+
+        Args:
+            mode: ``"isolated"`` launches a fresh Chromium instance;
+                ``"cdp"`` attaches to a running Chrome via
+                :mod:`core.browser.live_cdp`.
+            confirm_submit: human-in-the-loop gate for CDP mode. When
+                ``False``, fields are filled and scrolled into view but
+                ``_submit_form`` is never called (``ready_for_review``).
+                When ``True`` (or the user confirms via ``prompt_fn``),
+                the form is submitted.
+        """
         result: dict[str, Any] = {
             "status": "error",
             "platform": self.platform,
@@ -114,6 +128,61 @@ class BaseFormFiller:
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as p:
+                if mode == "cdp":
+                    from core.browser import live_cdp as live_cdp_mod
+
+                    context = live_cdp_mod.get_live_context(p, cdp_url=cdp_url)
+                    page = live_cdp_mod.find_or_open_tab(
+                        context, project["url"], project.get("id")
+                    )
+
+                    # Populate the bid form
+                    self._fill_form(page, project)
+
+                    # Scroll populated form into view (best effort)
+                    try:
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    except Exception:
+                        pass
+
+                    try:
+                        raw_url = getattr(page, "url", project["url"])
+                        page_url = raw_url if isinstance(raw_url, str) else project["url"]
+                    except Exception:
+                        page_url = project["url"]
+                    result["url"] = page_url
+
+                    should_submit = bool(confirm_submit)
+                    if prompt_fn is not None:
+                        msg = (
+                            "\nForm populated in live browser. "
+                            "Press [Enter] to submit, or type 'cancel' to abort: "
+                        )
+                        try:
+                            try:
+                                ans = str(prompt_fn(msg) or "").strip().lower()
+                            except TypeError:
+                                ans = str(prompt_fn() or "").strip().lower()
+                        except (EOFError, KeyboardInterrupt):
+                            ans = "cancel"
+                        if ans in ("cancel", "abort", "n", "no"):
+                            should_submit = False
+                        else:
+                            should_submit = True
+
+                    if should_submit:
+                        self._submit_form(page, project)
+                        result["status"] = "success"
+                        result["submitted"] = True
+                        result["details"] = "Application submitted successfully"
+                    else:
+                        result["status"] = "ready_for_review"
+                        result["submitted"] = False
+                        result["details"] = (
+                            "Form populated in browser. Waiting for user confirmation."
+                        )
+                    return result
+
                 browser = p.chromium.launch(headless=headless)
                 context_kwargs: dict[str, Any] = {}
                 if resolved_session and Path(resolved_session).exists():

@@ -31,6 +31,7 @@ from core.scrapers.bitjob import BitjobScraper
 from core.scrapers.karlancer import KarlancerScraper
 from core.scrapers.guru import GuruScraper
 from core.scrapers.laborx import LaborXScraper
+from core.scrapers.kaya import KayaScraper
 from core.scrapers.query_builder import build_search_queries
 from core.triage import evaluate_project
 from interfaces.telegram_bot import poll_updates, send_project_alert
@@ -225,6 +226,54 @@ def build_parser() -> argparse.ArgumentParser:
     browser_parser.add_argument("--list", action="store_true", help="List Chrome profiles")
     browser_parser.add_argument("--status", action="store_true", help="Check CDP port status")
 
+    # review
+    review_parser = subparsers.add_parser("review", help="Review top unapplied / shortlisted projects")
+    review_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of projects to display",
+    )
+    review_parser.add_argument(
+        "--shortlisted",
+        action="store_true",
+        default=False,
+        help="Show only shortlisted projects",
+    )
+    review_parser.add_argument(
+        "--sort",
+        type=str,
+        default="roi",
+        choices=["roi", "win_probability", "claude_leverage"],
+        help="Metric to sort by (default: roi)",
+    )
+
+    # pick
+    pick_parser = subparsers.add_parser("pick", help="Shortlist projects for action")
+    pick_parser.add_argument("ids", nargs="+", help="Project ID(s) or job hash(es) to shortlist")
+
+    # blueprint
+    blueprint_parser = subparsers.add_parser("blueprint", help="Show senior-freelancer dossier for a project")
+    blueprint_parser.add_argument("job_id", help="Target project ID or job hash")
+
+    # fill
+    fill_parser = subparsers.add_parser("fill", help="Populate bid form via CDP or isolated browser")
+    fill_parser.add_argument("job_id", help="Target project ID or job hash")
+    fill_parser.add_argument(
+        "--cdp",
+        type=str,
+        default=None,
+        nargs="?",
+        const="default",
+        help="Attach to live Chrome (optionally pass CDP URL, e.g. ws://127.0.0.1:9222/...)",
+    )
+    fill_parser.add_argument(
+        "--confirm",
+        action="store_true",
+        default=False,
+        help="Confirm live submission (default fills without submitting)",
+    )
+
     return parser
 
 
@@ -282,7 +331,7 @@ def run_scan(
             else:
                 platforms = [p for p, pcfg in plat_cfgs.items() if pcfg.get("enabled", True)]
                 if not platforms:
-                    platforms = ["ponisha", "parscoders", "freelancer", "bitjob", "karlancer", "guru", "laborx"]
+                    platforms = ["ponisha", "parscoders", "freelancer", "bitjob", "karlancer", "guru", "laborx", "kaya"]
 
             for plat in platforms:
                 delay = plat_cfgs.get(plat, {}).get("rate_limit_delay_sec", 2.0)
@@ -300,6 +349,8 @@ def run_scan(
                     scrapers_to_run.append(GuruScraper(rate_limit_delay_sec=delay))
                 elif plat == "laborx":
                     scrapers_to_run.append(LaborXScraper(rate_limit_delay_sec=delay))
+                elif plat == "kaya":
+                    scrapers_to_run.append(KayaScraper(rate_limit_delay_sec=delay))
 
             only_scopes = None
             raw_scope_arg = getattr(args, "scope", None)
@@ -635,7 +686,206 @@ def main(argv: list[str] | None = None) -> int:
         run_bot(args)
     elif args.command == "browser":
         run_browser(args)
+    elif args.command == "review":
+        run_review(args)
+    elif args.command == "pick":
+        run_pick(args)
+    elif args.command == "blueprint":
+        run_blueprint(args)
+    elif args.command == "fill":
+        run_fill(args)
     else:
         parser.print_help()
 
     return 0
+
+
+def _get_agent_api(db: DB | None = None) -> Any:
+    """Build an OmniHunterAgentAPI sharing an existing DB connection when given."""
+    from core.agent_api import OmniHunterAgentAPI
+
+    api = OmniHunterAgentAPI.__new__(OmniHunterAgentAPI)
+    api.config_path = "config.yaml"
+    api.config = _load_config()
+    if db is not None:
+        api.db = db
+        api.db_path = getattr(db, "db_path", "")
+        api._owns_db = False
+    else:
+        db_path = str(api.config.get("database", {}).get("path", "data/hunter.db"))
+        api.db_path = db_path
+        api.db = DB(db_path)
+        api.db.init_schema()
+        api._owns_db = True
+    from core.profile import FreelancerProfile
+
+    api.profile = FreelancerProfile()
+    api.scrapers = api._build_scrapers()
+    return api
+
+
+def run_review(
+    args: argparse.Namespace,
+    db: DB | None = None,
+) -> list[dict[str, Any]]:
+    """Display top unapplied / shortlisted projects in a terminal table.
+
+    Reads from the local database only (no live scraping) so review is
+    instant and never burns rate limit.
+    """
+    owns_db = False
+    if db is None:
+        cfg = _load_config()
+        db_path = cfg.get("database", {}).get("path", "data/hunter.db")
+        db = DB(db_path)
+        db.init_schema()
+        owns_db = True
+    try:
+        limit = getattr(args, "limit", 10) or 10
+        only_shortlisted = getattr(args, "shortlisted", False)
+        sort_by = getattr(args, "sort", "roi") or "roi"
+
+        key_map = {
+            "roi": "roi_score",
+            "win_probability": "win_probability",
+            "claude_leverage": "claude_leverage",
+        }
+        sort_field = key_map.get(sort_by, "roi_score")
+
+        if only_shortlisted:
+            projects = db.list_projects(status="shortlisted")
+        else:
+            # Unapplied pool: everything not yet applied/rejected.
+            projects = [
+                p
+                for p in db.list_projects()
+                if (p.get("status") or "new") not in ("applied", "rejected")
+            ]
+        projects.sort(
+            key=lambda p: (
+                float(p.get(sort_field) or 0),
+                float(p.get("fit_score") or 0),
+            ),
+            reverse=True,
+        )
+        projects = projects[:limit]
+
+        print(f"\n--- Review ({len(projects)}) ---")
+        if not projects:
+            print("No projects to review. Run `hunter scan --mock` first.")
+            return []
+        print(
+            f"{'ID':<6} | {'Tier':<4} | {'ROI':<10} | {'Win%':<6} | {'Claude':<6} | {'Status':<11} | {'Title'}"
+        )
+        print("-" * 90)
+        for p in projects:
+            p_id = str(p.get("id") or "-")
+            p_tier = str(p.get("tier") or "-")
+            roi = p.get("roi_score")
+            roi_s = f"{float(roi):.0f}" if roi is not None else "-"
+            win = p.get("win_probability")
+            win_s = f"{float(win):.0%}" if win is not None else "-"
+            lev = p.get("claude_leverage")
+            lev_s = str(lev) if lev is not None else "-"
+            p_stat = str(p.get("status") or "new")
+            p_title = str(p.get("title") or "")[:35]
+            print(
+                f"{p_id:<6} | {p_tier:<4} | {roi_s:<10} | {win_s:<6} | {lev_s:<6} | {p_stat:<11} | {p_title}"
+            )
+        return projects
+    finally:
+        if owns_db and db is not None:
+            db.close()
+
+
+def run_pick(
+    args: argparse.Namespace,
+    db: DB | None = None,
+) -> list[str]:
+    """Shortlist one or more projects by ID or job hash."""
+    owns_db = False
+    if db is None:
+        cfg = _load_config()
+        db_path = cfg.get("database", {}).get("path", "data/hunter.db")
+        db = DB(db_path)
+        db.init_schema()
+        owns_db = True
+    try:
+        picked: list[str] = []
+        for job_id in getattr(args, "ids", []) or []:
+            ok = db.update_status(job_id, "shortlisted")
+            status = "shortlisted" if ok else "NOT FOUND"
+            print(f"{job_id}: {status}")
+            if ok:
+                picked.append(str(job_id))
+        return picked
+    finally:
+        if owns_db and db is not None:
+            db.close()
+
+
+def run_blueprint(
+    args: argparse.Namespace,
+    db: DB | None = None,
+) -> dict[str, Any]:
+    """Display the full senior-freelancer dossier for a project."""
+    api = _get_agent_api(db)
+    try:
+        dossier = api.get_blueprint(args.job_id)
+        project = dossier.get("project", {})
+        triage = dossier.get("triage", {})
+        blueprint = dossier.get("blueprint", {})
+        print(f"\n=== Blueprint: {project.get('title')} ===")
+        print(f"Platform: {project.get('platform')} | Tier: {triage.get('tier')} | Scope: {triage.get('scope')}")
+        print(f"\n[Technical Hook]\n{blueprint.get('technical_hook')}")
+        print("\n[Prerequisites]")
+        for item in blueprint.get("prerequisites") or []:
+            print(f"  - {item}")
+        print(f"\n[Clarifying Question]\n{blueprint.get('clarifying_question')}")
+        print(f"\n[Roadmap]")
+        for step in blueprint.get("roadmap") or []:
+            print(f"  {step}")
+        pricing = blueprint.get("pricing_breakdown") or {}
+        print(
+            f"\n[Pricing] bid={blueprint.get('suggested_bid')} "
+            f"days={blueprint.get('delivery_days')} "
+            f"currency={pricing.get('currency')}"
+        )
+        print(f"\n[Proposal]\n{blueprint.get('proposal')}")
+        return dossier
+    finally:
+        if getattr(api, "_owns_db", True):
+            try:
+                api.db.close()
+            except Exception:
+                pass
+
+
+def run_fill(
+    args: argparse.Namespace,
+    db: DB | None = None,
+) -> dict[str, Any]:
+    """Populate the bid form via live CDP tab or isolated browser."""
+    api = _get_agent_api(db)
+    try:
+        cdp_opt = getattr(args, "cdp", None)
+        confirm = bool(getattr(args, "confirm", False))
+        # --cdp absent -> isolated browser; --cdp [--cdp URL] -> live Chrome
+        # (auto-discovery when no URL is given).
+        if cdp_opt is None:
+            cdp_url = None
+        elif cdp_opt == "default":
+            cdp_url = ""
+        else:
+            cdp_url = str(cdp_opt)
+        res = api.fill_tab(args.job_id, cdp_url=cdp_url, confirm_submit=confirm)
+        print(f"fill result: {res.get('status')} (submitted={res.get('submitted')})")
+        if res.get("details"):
+            print(res["details"])
+        return res
+    finally:
+        if getattr(api, "_owns_db", True):
+            try:
+                api.db.close()
+            except Exception:
+                pass

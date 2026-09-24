@@ -388,3 +388,230 @@ def test_guru_scraper_parsing():
     res = scraper.parse_html(html)
     assert len(res) == 1
     assert res[0]["currency"] == "USD"
+
+
+# --------------------------------------------------------------------------
+# KayaScraper tests
+# --------------------------------------------------------------------------
+from core.scrapers.kaya import KayaScraper
+
+
+def test_kaya_platform_attribute_pinned():
+    assert KayaScraper.platform == "kaya"
+
+
+def test_kaya_parse_eur_fixed_low_competition():
+    scraper = KayaScraper()
+    html = """
+    <section class="group font-IranSansX some-extra-class">
+        <h3><a href="/jobs/42001">Build a Telegram Bot</a></h3>
+        <p>Create an automated Telegram bot using Python and aiogram.</p>
+        <div class="skills"><span>Python</span><span>Telegram</span></div>
+        <div class="budget">30 - 250 (EUR)Fixed</div>
+        <div class="competition">Low Competetion Expected</div>
+    </section>
+    """
+    items = scraper.parse_html(html)
+    assert len(items) == 1
+    item = items[0]
+    assert item["platform"] == "kaya"
+    assert item["platform_id"] == "42001"
+    assert item["title"] == "Build a Telegram Bot"
+    assert item["url"] == "https://kaya.ir/jobs/42001"
+    assert "automated Telegram bot" in item["description"]
+    assert item["budget_min"] == 30.0
+    assert item["budget_max"] == 250.0
+    assert item["currency"] == "EUR"
+    assert item["payment_type"] == "fixed"
+    assert item["proposals_count"] == 3
+    assert "Python" in item["skills"]
+    assert "Telegram" in item["skills"]
+    assert REQUIRED_KEYS.issubset(item.keys())
+
+
+def test_kaya_parse_usd_hourly_high_competition():
+    scraper = KayaScraper()
+    html = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/55123">Data Pipeline Engineer</a>
+        <p>We need a data pipeline built with Apache Airflow.</p>
+        <div class="tags"><span>Python</span><span>Airflow</span><span>SQL</span></div>
+        <div>8 - 15 (USD)Hourly</div>
+        <span>High Competetion Expected</span>
+    </section>
+    """
+    items = scraper.parse_html(html)
+    assert len(items) == 1
+    item = items[0]
+    assert item["platform"] == "kaya"
+    assert item["platform_id"] == "55123"
+    assert item["title"] == "Data Pipeline Engineer"
+    assert item["url"] == "https://kaya.ir/jobs/55123"
+    assert item["budget_min"] == 8.0
+    assert item["budget_max"] == 15.0
+    assert item["currency"] == "USD"
+    assert item["payment_type"] == "hourly"
+    assert item["proposals_count"] == 25
+    assert "Python" in item["skills"]
+    assert "Airflow" in item["skills"]
+    assert "SQL" in item["skills"]
+    assert REQUIRED_KEYS.issubset(item.keys())
+
+
+def test_kaya_parse_persian_competition_labels():
+    scraper = KayaScraper()
+    html_low = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/100">Job A</a><p>Desc</p>
+        <span>کم رقابت</span>
+    </section>
+    """
+    html_high = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/200">Job B</a><p>Desc</p>
+        <span>پر رقابت</span>
+    </section>
+    """
+    low_items = scraper.parse_html(html_low)
+    assert low_items[0]["proposals_count"] == 3
+
+    high_items = scraper.parse_html(html_high)
+    assert high_items[0]["proposals_count"] == 25
+
+
+def test_kaya_default_competition():
+    scraper = KayaScraper()
+    html = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/300">Job C</a><p>Some work</p>
+    </section>
+    """
+    items = scraper.parse_html(html)
+    assert items[0]["proposals_count"] == 10
+
+
+def test_kaya_empty_and_malformed_html():
+    scraper = KayaScraper()
+    assert scraper.parse_html("") == []
+    assert scraper.parse_html("<html><body>No cards here</body></html>") == []
+    assert scraper.parse_html("<section class='group font-IranSansX'>no links</section>") == []
+    # Malformed HTML with no /jobs/ link
+    assert scraper.parse_html("<div><a href='/other/123'>Not a job</a></div>") == []
+
+
+def test_kaya_multiple_cards():
+    scraper = KayaScraper()
+    html = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/1001">First Job</a><p>Desc 1</p>
+        <div>10 - 50 (EUR)Fixed</div>
+    </section>
+    <section class="group font-IranSansX">
+        <a href="/jobs/1002">Second Job</a><p>Desc 2</p>
+        <div>20 - 100 (GBP)Hourly</div>
+    </section>
+    """
+    items = scraper.parse_html(html)
+    assert len(items) == 2
+    assert items[0]["platform_id"] == "1001"
+    assert items[0]["currency"] == "EUR"
+    assert items[1]["platform_id"] == "1002"
+    assert items[1]["currency"] == "GBP"
+    assert items[1]["payment_type"] == "hourly"
+
+
+def test_kaya_fallback_link_extraction():
+    """When there are no <section> cards, the parser falls back to link-based extraction."""
+    scraper = KayaScraper()
+    html = """
+    <div>
+        <a href="/jobs/7777">Fallback Job Title</a>
+        <p>Some description here.</p>
+        <span>50 - 200 (USD)Fixed</span>
+        <span>Low Competetion Expected</span>
+    </div>
+    """
+    items = scraper.parse_html(html)
+    assert len(items) == 1
+    assert items[0]["platform_id"] == "7777"
+    assert items[0]["title"] == "Fallback Job Title"
+    assert items[0]["proposals_count"] == 3
+
+
+def test_kaya_fetch_projects_mock():
+    scraper = KayaScraper()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/9999">Mock Kaya Job</a>
+        <p>Mock description</p>
+        <div>100 - 500 (EUR)Fixed</div>
+    </section>
+    """
+    with patch.object(scraper, "get", return_value=mock_resp):
+        items = scraper.fetch_projects(search_query="python")
+        assert len(items) == 1
+        assert items[0]["platform_id"] == "9999"
+        assert items[0]["title"] == "Mock Kaya Job"
+        assert items[0]["budget_min"] == 100.0
+        assert items[0]["budget_max"] == 500.0
+
+
+def test_kaya_fetch_projects_failure():
+    scraper = KayaScraper()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    with patch.object(scraper, "get", return_value=mock_resp):
+        assert scraper.fetch_projects("test") == []
+
+
+def test_kaya_query_builder_uses_english():
+    """Kaya mirrors Freelancer.com, so it should receive English keywords."""
+    from core.scrapers.query_builder import IRANIAN_PLATFORMS, build_search_queries
+
+    assert "kaya" not in IRANIAN_PLATFORMS
+
+    config = {
+        "scopes": {
+            "bots": {
+                "enabled": True,
+                "keywords": ["telegram bot", "ربات تلگرام"],
+            }
+        }
+    }
+    queries = build_search_queries(config, "kaya")
+    assert "telegram bot" in queries
+    assert "ربات تلگرام" not in queries
+
+
+def test_kaya_in_config_yaml():
+    """Kaya must be registered in config.yaml platforms."""
+    import yaml
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parent.parent / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    assert "kaya" in config["platforms"]
+    assert config["platforms"]["kaya"]["enabled"] is True
+    assert config["platforms"]["kaya"]["base_url"] == "https://kaya.ir"
+
+
+def test_kaya_budget_symbol_format():
+    """Handle $30 - $250 Fixed format."""
+    scraper = KayaScraper()
+    html = """
+    <section class="group font-IranSansX">
+        <a href="/jobs/8888">Symbol Budget Job</a>
+        <p>Description</p>
+        <div>$30 - $250 Fixed</div>
+    </section>
+    """
+    items = scraper.parse_html(html)
+    assert len(items) == 1
+    assert items[0]["budget_min"] == 30.0
+    assert items[0]["budget_max"] == 250.0
+    assert items[0]["currency"] == "USD"
+    assert items[0]["payment_type"] == "fixed"

@@ -19,6 +19,10 @@ platforms:
     base_url: "https://www.freelancer.com"
     api_url: "https://www.freelancer.com/api/projects/0.1/projects/active"
     rate_limit_delay_sec: 3.0
+  kaya:
+    enabled: true
+    base_url: "https://kaya.ir"
+    rate_limit_delay_sec: 2.0
 
 scopes:
   bots:

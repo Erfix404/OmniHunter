@@ -19,6 +19,16 @@ def test_architect_bot_project():
     assert "aiogram" in " ".join(arch["tech_stack"]).lower() or "python" in " ".join(arch["tech_stack"]).lower()
     assert arch["suggested_bid"] >= 2000000
     assert len(arch["proposal"]) > 50
+    # New fields
+    assert "technical_hook" in arch
+    assert isinstance(arch["technical_hook"], str)
+    assert len(arch["technical_hook"]) > 10
+    assert "prerequisites" in arch
+    assert isinstance(arch["prerequisites"], list)
+    assert len(arch["prerequisites"]) >= 1
+    assert "clarifying_question" in arch
+    assert isinstance(arch["clarifying_question"], str)
+    assert len(arch["clarifying_question"]) > 10
 
 
 def test_architect_bale_bot():
@@ -340,5 +350,46 @@ def test_architect_llm_cliche_complete_fallback(monkeypatch):
         assert "امیدوارم حالتون خوب باشه" not in arch["proposal"]
         # Fallback to rule-based template
         assert "aiogram" in arch["proposal"] or "پایتون" in arch["proposal"]
+
+
+def test_architect_new_fields_all_scopes():
+    """All scopes return technical_hook, prerequisites, clarifying_question."""
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proj = {
+            "title": f"پروژه تستی برای {scope}",
+            "description": "توضیحات فنی نیازمندی‌ها",
+            "scope": scope,
+            "currency": "IRT",
+        }
+        arch = generate_architecture(proj)
+
+        assert "technical_hook" in arch, f"Missing technical_hook for {scope}"
+        assert isinstance(arch["technical_hook"], str)
+        assert len(arch["technical_hook"]) > 10
+        # No cliché greetings in technical_hook
+        assert "سلام" not in arch["technical_hook"]
+        assert "احترام" not in arch["technical_hook"]
+
+        assert "prerequisites" in arch, f"Missing prerequisites for {scope}"
+        assert isinstance(arch["prerequisites"], list)
+        assert len(arch["prerequisites"]) >= 1
+        assert all(isinstance(p, str) for p in arch["prerequisites"])
+
+        assert "clarifying_question" in arch, f"Missing clarifying_question for {scope}"
+        assert isinstance(arch["clarifying_question"], str)
+        assert len(arch["clarifying_question"]) > 10
+
+
+def test_architect_empty_input_has_new_fields():
+    """Even empty/None input returns the new fields."""
+    arch_empty = generate_architecture({})
+    assert "technical_hook" in arch_empty
+    assert "prerequisites" in arch_empty
+    assert "clarifying_question" in arch_empty
+
+    arch_none = generate_architecture(None)
+    assert "technical_hook" in arch_none
+    assert "prerequisites" in arch_none
+    assert "clarifying_question" in arch_none
 
 

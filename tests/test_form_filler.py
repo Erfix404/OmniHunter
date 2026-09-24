@@ -501,3 +501,321 @@ def test_form_filler_manual_inspection_cancel_and_confirm():
         assert res_confirm["submitted"] is True
 
 
+# ---------------------------------------------------------------------------
+# Phase 4: Live Chrome CDP attachment
+# ---------------------------------------------------------------------------
+
+def test_find_tab_matches_existing_url():
+    from core.browser.live_cdp import find_or_open_tab
+
+    mock_page = MagicMock()
+    mock_page.url = "https://karlancer.com/projects/123"
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    found = find_or_open_tab(mock_context, "https://karlancer.com/projects/123")
+    assert found is mock_page
+    mock_page.bring_to_front.assert_called_once()
+    mock_context.new_page.assert_not_called()
+
+
+def test_find_tab_matches_project_id():
+    from core.browser.live_cdp import find_or_open_tab
+
+    mock_page = MagicMock()
+    mock_page.url = "https://example.com/job/999/detail"
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    found = find_or_open_tab(mock_context, "https://example.com/other", project_id="999")
+    assert found is mock_page
+    mock_page.bring_to_front.assert_called_once()
+    mock_context.new_page.assert_not_called()
+
+
+def test_find_tab_opens_new_when_absent():
+    from core.browser.live_cdp import find_or_open_tab
+
+    other_page = MagicMock()
+    other_page.url = "https://example.com/unrelated"
+    mock_context = MagicMock()
+    mock_context.pages = [other_page]
+    new_page = MagicMock()
+    mock_context.new_page.return_value = new_page
+
+    url = "https://karlancer.com/projects/777"
+    found = find_or_open_tab(mock_context, url)
+    assert found is new_page
+    new_page.goto.assert_called_once_with(url, timeout=30000)
+
+
+def test_get_live_context_handles_connection_error():
+    from core.browser.live_cdp import get_live_context
+
+    mock_pw = MagicMock()
+    mock_pw.chromium.connect_over_cdp.side_effect = ConnectionError("refused")
+
+    with pytest.raises(RuntimeError, match="Chrome is not running with remote debugging"):
+        get_live_context(mock_pw, cdp_url="ws://127.0.0.1:9222/devtools/browser")
+
+
+def test_get_live_context_returns_first_context():
+    from core.browser.live_cdp import get_live_context
+
+    mock_pw = MagicMock()
+    mock_browser = MagicMock()
+    mock_context = MagicMock()
+    mock_browser.contexts = [mock_context]
+    mock_pw.chromium.connect_over_cdp.return_value = mock_browser
+
+    ctx = get_live_context(mock_pw, cdp_url="ws://127.0.0.1:9222/devtools/browser")
+    assert ctx is mock_context
+
+
+def test_get_live_context_creates_context_when_empty():
+    from core.browser.live_cdp import get_live_context
+
+    mock_pw = MagicMock()
+    mock_browser = MagicMock()
+    mock_browser.contexts = []
+    fresh = MagicMock()
+    mock_browser.new_context.return_value = fresh
+    mock_pw.chromium.connect_over_cdp.return_value = mock_browser
+
+    ctx = get_live_context(mock_pw, cdp_url="ws://127.0.0.1:9222/devtools/browser")
+    assert ctx is fresh
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Karlancer and Kaya fillers
+# ---------------------------------------------------------------------------
+
+def test_karlancer_form_filler_dry_run():
+    from core.form_filler import KarlancerFormFiller
+
+    filler = KarlancerFormFiller()
+    assert filler.platform == "karlancer"
+    project = {
+        "url": "https://karlancer.com/projects/123",
+        "suggested_bid": 5000000,
+        "delivery_days": 7,
+        "proposal": "Karlancer proposal text",
+    }
+
+    with patch("playwright.sync_api.sync_playwright") as mock_sync_pw:
+        mock_p = mock_sync_pw.return_value.__enter__.return_value
+        mock_browser = MagicMock()
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_p.chromium.launch.return_value = mock_browser
+        mock_browser.new_context.return_value = mock_context
+        mock_context.new_page.return_value = mock_page
+
+        result = filler.fill_application(project, dry_run=True, headless=True)
+
+        assert result["status"] == "ready"
+        assert result["platform"] == "karlancer"
+        assert result["submitted"] is False
+        assert result["bid"] == 5000000
+        assert result["delivery_days"] == 7
+        assert mock_page.fill.call_count >= 3
+        mock_page.click.assert_not_called()
+
+
+def test_karlancer_form_filler_validation():
+    from core.form_filler import KarlancerFormFiller
+
+    filler = KarlancerFormFiller()
+    with pytest.raises(ValueError, match="Missing required bid parameters"):
+        filler.validate_project({"url": "https://karlancer.com/x"})
+
+
+def test_kaya_form_filler_dry_run():
+    from core.form_filler import KayaFormFiller
+
+    filler = KayaFormFiller()
+    assert filler.platform == "kaya"
+    project = {
+        "url": "https://kaya.ir/jobs/456",
+        "suggested_bid": 200,
+        "delivery_days": 10,
+        "proposal": "Kaya proposal text",
+    }
+
+    with patch("playwright.sync_api.sync_playwright") as mock_sync_pw:
+        mock_p = mock_sync_pw.return_value.__enter__.return_value
+        mock_browser = MagicMock()
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_p.chromium.launch.return_value = mock_browser
+        mock_browser.new_context.return_value = mock_context
+        mock_context.new_page.return_value = mock_page
+
+        result = filler.fill_application(project, dry_run=True, headless=True)
+
+        assert result["status"] == "ready"
+        assert result["platform"] == "kaya"
+        assert result["submitted"] is False
+        assert mock_page.fill.call_count >= 3
+        mock_page.click.assert_not_called()
+
+
+def test_kaya_form_filler_submission():
+    from core.form_filler import KayaFormFiller
+
+    filler = KayaFormFiller()
+    project = {
+        "url": "https://kaya.ir/jobs/456",
+        "suggested_bid": 200,
+        "delivery_days": 10,
+        "proposal": "Kaya proposal text",
+    }
+
+    with patch("playwright.sync_api.sync_playwright") as mock_sync_pw:
+        mock_p = mock_sync_pw.return_value.__enter__.return_value
+        mock_browser = MagicMock()
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_p.chromium.launch.return_value = mock_browser
+        mock_browser.new_context.return_value = mock_context
+        mock_context.new_page.return_value = mock_page
+
+        result = filler.fill_application(project, dry_run=False, headless=True)
+
+        assert result["status"] == "submitted"
+        assert result["submitted"] is True
+        mock_page.click.assert_called_once()
+
+
+def test_get_form_filler_factory_karlancer_kaya():
+    from core.form_filler import KarlancerFormFiller, KayaFormFiller
+
+    karlancer = get_form_filler("karlancer")
+    assert isinstance(karlancer, KarlancerFormFiller)
+    kaya = get_form_filler("kaya")
+    assert isinstance(kaya, KayaFormFiller)
+    # Case/whitespace insensitivity
+    assert isinstance(get_form_filler("  KAYA  "), KayaFormFiller)
+    assert isinstance(get_form_filler("Karlancer"), KarlancerFormFiller)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Human-in-the-Loop confirmation gate (CDP mode)
+# ---------------------------------------------------------------------------
+
+def _cdp_project():
+    return {
+        "url": "https://karlancer.com/projects/123",
+        "suggested_bid": 5000000,
+        "delivery_days": 7,
+        "proposal": "Gate proposal",
+    }
+
+
+def test_cdp_confirm_gate_ready_for_review():
+    from core.form_filler import KarlancerFormFiller
+
+    filler = KarlancerFormFiller()
+    project = _cdp_project()
+
+    with patch("playwright.sync_api.sync_playwright") as mock_sync_pw, \
+         patch("core.browser.live_cdp.get_live_context") as mock_ctx, \
+         patch("core.browser.live_cdp.find_or_open_tab") as mock_tab:
+        mock_page = MagicMock()
+        mock_page.url = project["url"]
+        mock_tab.return_value = mock_page
+
+        result = filler.fill_application(
+            project, mode="cdp", confirm_submit=False, headless=True
+        )
+
+        assert result["status"] == "ready_for_review"
+        assert result["submitted"] is False
+        assert result["url"] == project["url"]
+        assert result["bid"] == 5000000
+        assert result["delivery_days"] == 7
+        assert result["details"] == "Form populated in browser. Waiting for user confirmation."
+        # Submit button must never be clicked
+        mock_page.click.assert_not_called()
+        assert mock_page.fill.call_count >= 3
+
+
+def test_cdp_confirm_gate_submits_when_confirmed():
+    from core.form_filler import KarlancerFormFiller
+
+    filler = KarlancerFormFiller()
+    project = _cdp_project()
+
+    with patch("playwright.sync_api.sync_playwright"), \
+         patch("core.browser.live_cdp.get_live_context"), \
+         patch("core.browser.live_cdp.find_or_open_tab") as mock_tab:
+        mock_page = MagicMock()
+        mock_page.url = project["url"]
+        mock_tab.return_value = mock_page
+
+        result = filler.fill_application(
+            project, mode="cdp", confirm_submit=True, headless=True
+        )
+
+        assert result["status"] == "success"
+        assert result["submitted"] is True
+        mock_page.click.assert_called_once()
+
+
+def test_cdp_confirm_gate_prompt_fn_confirm():
+    from core.form_filler import KayaFormFiller
+
+    filler = KayaFormFiller()
+    project = {
+        "url": "https://kaya.ir/jobs/456",
+        "suggested_bid": 200,
+        "delivery_days": 10,
+        "proposal": "Gate proposal",
+    }
+
+    with patch("playwright.sync_api.sync_playwright"), \
+         patch("core.browser.live_cdp.get_live_context"), \
+         patch("core.browser.live_cdp.find_or_open_tab") as mock_tab:
+        mock_page = MagicMock()
+        mock_page.url = project["url"]
+        mock_tab.return_value = mock_page
+
+        result = filler.fill_application(
+            project, mode="cdp", confirm_submit=False,
+            prompt_fn=lambda msg: "", headless=True,
+        )
+
+        assert result["status"] == "success"
+        assert result["submitted"] is True
+        mock_page.click.assert_called_once()
+
+
+def test_cdp_confirm_gate_prompt_fn_cancel():
+    from core.form_filler import KayaFormFiller
+
+    filler = KayaFormFiller()
+    project = {
+        "url": "https://kaya.ir/jobs/456",
+        "suggested_bid": 200,
+        "delivery_days": 10,
+        "proposal": "Gate proposal",
+    }
+
+    with patch("playwright.sync_api.sync_playwright"), \
+         patch("core.browser.live_cdp.get_live_context"), \
+         patch("core.browser.live_cdp.find_or_open_tab") as mock_tab:
+        mock_page = MagicMock()
+        mock_page.url = project["url"]
+        mock_tab.return_value = mock_page
+
+        result = filler.fill_application(
+            project, mode="cdp", confirm_submit=False,
+            prompt_fn=lambda msg: "cancel", headless=True,
+        )
+
+        assert result["status"] == "ready_for_review"
+        assert result["submitted"] is False
+        mock_page.click.assert_not_called()
+
+
+
