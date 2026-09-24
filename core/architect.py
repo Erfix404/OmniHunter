@@ -92,6 +92,19 @@ BANNED_CLICHES: list[str] = [
     "hope you are doing well",
 ]
 
+# Scope Shield: transparent phase-1 boundary that protects against scope creep
+# while framing phase-2 as a paid add-on.
+SCOPE_SHIELD_TEXT = (
+    "مرزبندی شفاف تعهدات فاز جاری: تمرکز این فاز بر اجرای دقیق و پایدار "
+    "هسته اصلی نیازمندی‌های مطرح‌شده است. قابلیت‌های تکمیلی و سفارشی‌سازی‌های "
+    "ثانویه در فاز دوم توسعه به عنوان الحاقیه قابل برنامه‌ریزی خواهد بود تا "
+    "فاز اول سریع، متمرکز و با بالاترین کیفیت به بهره‌برداری برسد."
+)
+
+
+def generate_scope_shield() -> str:
+    """Return the Scope Shield paragraph for proposals and blueprints."""
+    return SCOPE_SHIELD_TEXT
 # Scope-specific technical hooks (direct, no clichés)
 DEFAULT_TECHNICAL_HOOKS: dict[str, str] = {
     "bots": "معماری ربات بر پایه aiogram 3.x با FSM و مدیریت نشست‌ها طراحی می‌شود تا پایداری و مقیاس‌پذیری در بار بالا تضمین گردد.",
@@ -416,6 +429,7 @@ def _build_rule_based_proposal(
         f"گام اول: {step_one_tail}.\n"
         f"گام دوم: {step_two_tail}.\n"
         "گام سوم: آزمون نهایی، آماده‌سازی خروجی تمیز و تحویل شفاف.\n\n"
+        f"{SCOPE_SHIELD_TEXT}\n\n"
         "کاهش ریسک و تضمین پایداری:\n"
         "تعهد می‌دهم پیش از تحویل، تست کامل سناریوهای اصلی و حالت‌های مرزی را انجام دهم، "
         "مستندات شفاف نحوه اجرا و استفاده از سیستم را تحویل دهم "
@@ -700,6 +714,7 @@ def generate_architecture(
         "tech_stack": tech_stack,
         "roadmap": roadmap,
         "proposal": proposal,
+        "scope_shield": SCOPE_SHIELD_TEXT,
         "technical_hook": technical_hook,
         "prerequisites": list(DEFAULT_PREREQUISITES.get(scope, DEFAULT_PREREQUISITES["scripting"])),
         "clarifying_question": DEFAULT_CLARIFYING_QUESTIONS.get(scope, DEFAULT_CLARIFYING_QUESTIONS["scripting"]),

@@ -74,6 +74,37 @@ DEFAULT_RED_FLAGS: list[str] = [
 _RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 
 
+def _compute_arbitrage(
+    estimated_hours: float | None,
+    claude_leverage: int | None,
+    effective_budget: float | None,
+) -> tuple[float | None, float | None]:
+    """Calculate agent_hours and arbitrage_score (effective hourly yield).
+
+    agent_hours = max(0.5, round(estimated_hours * max(0.15, 1.0 - (leverage-1)*0.09), 2))
+    arbitrage_score = round(effective_budget / agent_hours, 2) when computable.
+    """
+    if estimated_hours is None:
+        return None, None
+    try:
+        eh = float(estimated_hours)
+    except (ValueError, TypeError):
+        return None, None
+    try:
+        cl = int(claude_leverage) if claude_leverage is not None else 1
+    except (ValueError, TypeError):
+        cl = 1
+    factor = max(0.15, (1.0 - (cl - 1) * 0.09))
+    agent_hours = max(0.5, round(eh * factor, 2))
+    arbitrage_score: float | None = None
+    try:
+        if effective_budget is not None and agent_hours > 0:
+            arbitrage_score = round(float(effective_budget) / agent_hours, 2)
+    except (ValueError, TypeError, ZeroDivisionError):
+        arbitrage_score = None
+    return agent_hours, arbitrage_score
+
+
 def detect_red_flags(title_norm: str, desc_norm: str) -> list[str]:
     """Return the subset of DEFAULT_RED_FLAGS found in normalized title/description."""
     combined = f"{title_norm or ''} {desc_norm or ''}".strip()
@@ -355,6 +386,7 @@ def evaluate_project(
     """
     _empty_risk_flags: list[str] = []
     if not isinstance(project, dict):
+        _ah, _as = _compute_arbitrage(None, 1, None)
         return {
             "tier": "C",
             "fit_score": 0.0,
@@ -363,6 +395,8 @@ def evaluate_project(
             "rejection_reason": "no_scope_match",
             "estimated_hours": None,
             "roi_score": None,
+            "agent_hours": _ah,
+            "arbitrage_score": _as,
             "claude_leverage": 1,
             "difficulty": "پیچیده",
             "difficulty_score": 5,
@@ -399,6 +433,7 @@ def evaluate_project(
     for term in combined_blacklist:
         term_norm = normalize_text(term)
         if term_norm and term_norm in combined_text:
+            _s_ah, _s_as = _compute_arbitrage(None, 1, None)
             return {
                 "tier": "C",
                 "fit_score": 0.0,
@@ -407,6 +442,8 @@ def evaluate_project(
                 "rejection_reason": "scam_detected",
                 "estimated_hours": None,
                 "roi_score": None,
+                "agent_hours": _s_ah,
+                "arbitrage_score": _s_as,
                 "claude_leverage": 1,
                 "difficulty": "پیچیده",
                 "difficulty_score": 5,
@@ -441,6 +478,7 @@ def evaluate_project(
 
     # Check minimum fit threshold
     if best_scope is None or best_score < 0.3:
+        _n_ah, _n_as = _compute_arbitrage(None, 1, None)
         return {
             "tier": "C",
             "fit_score": best_score,
@@ -449,6 +487,8 @@ def evaluate_project(
             "rejection_reason": "no_scope_match",
             "estimated_hours": None,
             "roi_score": None,
+            "agent_hours": _n_ah,
+            "arbitrage_score": _n_as,
             "claude_leverage": 1,
             "difficulty": "پیچیده",
             "difficulty_score": 5,
@@ -496,6 +536,7 @@ def evaluate_project(
             _est = DEFAULT_ESTIMATED_HOURS.get(best_scope, 4.0)
             _diff, _ds = _compute_difficulty(best_score, _est)
             _ps = _compute_pricing_strategy(_wp)
+            _d_ah, _d_as = _compute_arbitrage(_est, _cl, None)
             return {
                 "tier": "C",
                 "fit_score": best_score,
@@ -504,6 +545,8 @@ def evaluate_project(
                 "rejection_reason": "scope_declined_by_profile",
                 "estimated_hours": _est,
                 "roi_score": None,
+                "agent_hours": _d_ah,
+                "arbitrage_score": _d_as,
                 "claude_leverage": _cl,
                 "difficulty": _diff,
                 "difficulty_score": _ds,
@@ -538,6 +581,7 @@ def evaluate_project(
         _wp = _compute_win_probability(best_score, project)
         _diff, _ds = _compute_difficulty(best_score, estimated_hours)
         _ps = _compute_pricing_strategy(_wp)
+        _b_ah, _b_as = _compute_arbitrage(estimated_hours, _cl, effective_budget)
         return {
             "tier": "C",
             "fit_score": best_score,
@@ -546,6 +590,8 @@ def evaluate_project(
             "rejection_reason": "budget_below_minimum",
             "estimated_hours": estimated_hours,
             "roi_score": roi_score,
+            "agent_hours": _b_ah,
+            "arbitrage_score": _b_as,
             "claude_leverage": _cl,
             "difficulty": _diff,
             "difficulty_score": _ds,
@@ -582,6 +628,9 @@ def evaluate_project(
     win_probability = _compute_win_probability(best_score, project)
     difficulty, difficulty_score = _compute_difficulty(best_score, estimated_hours)
     pricing_strategy = _compute_pricing_strategy(win_probability)
+    agent_hours, arbitrage_score = _compute_arbitrage(
+        estimated_hours, claude_leverage, effective_budget
+    )
 
     return {
         "tier": tier,
@@ -591,6 +640,8 @@ def evaluate_project(
         "rejection_reason": rejection_reason,
         "estimated_hours": estimated_hours,
         "roi_score": roi_score,
+        "agent_hours": agent_hours,
+        "arbitrage_score": arbitrage_score,
         "claude_leverage": claude_leverage,
         "difficulty": difficulty,
         "difficulty_score": difficulty_score,

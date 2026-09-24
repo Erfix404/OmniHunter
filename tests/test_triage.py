@@ -624,6 +624,82 @@ def test_detect_red_flags_helper_and_assess():
     assert assess_client_risk(["x", "y"]) == "high"
 
 
+def test_arbitrage_high_leverage_beats_low_leverage():
+    """High Claude leverage -> fewer agent hours -> higher arbitrage yield."""
+    base = {
+        "title": "ساخت ربات تلگرام ووکامرس",
+        "description": "پایتون و تلگرام برای فروشگاه",
+        "budget_min": 2500000,
+        "currency": "IRT",
+    }
+    res = evaluate_project(dict(base), {})
+    assert res["scope"] == "bots"
+    assert res["claude_leverage"] == 9
+    # bots: estimated 6.0h, factor = 1.0 - 8*0.09 = 0.28 -> 1.68 agent hours
+    assert res["agent_hours"] == 1.68
+    assert res["arbitrage_score"] == round(2500000 / 1.68, 2)
+
+    low = evaluate_project(
+        {
+            "title": "ترجمه مقاله تخصصی هوش مصنوعی",
+            "description": "ترجمه متون دانشگاهی و مقاله ISI انگلیسی به فارسی",
+            "budget_min": 800000,
+            "currency": "IRT",
+        },
+        {},
+    )
+    assert low["scope"] == "translation"
+    assert low["claude_leverage"] == 5
+    # translation: estimated 3.0h, factor = 1.0 - 4*0.09 = 0.64 -> 1.92 agent hours
+    assert low["agent_hours"] == 1.92
+    assert low["arbitrage_score"] == round(800000 / 1.92, 2)
+    assert res["arbitrage_score"] > low["arbitrage_score"]
+
+
+def test_arbitrage_formula_examples():
+    """Verify the exact formula from the spec on synthetic inputs."""
+    from core.triage import _compute_arbitrage
+
+    ah, score = _compute_arbitrage(6.0, 10, 6000000)
+    assert ah == 1.14  # 6.0 * 0.19
+    assert score == round(6000000 / 1.14, 2)
+
+    ah2, score2 = _compute_arbitrage(6.0, 2, 6000000)
+    assert ah2 == 5.46  # 6.0 * 0.91
+    assert score2 == round(6000000 / 5.46, 2)
+
+    # No budget -> agent_hours computed but arbitrage_score is None
+    ah3, score3 = _compute_arbitrage(4.0, 9, None)
+    assert ah3 is not None and ah3 > 0
+    assert score3 is None
+
+    # Missing hours -> both None
+    assert _compute_arbitrage(None, 9, 1000) == (None, None)
+
+
+def test_arbitrage_fields_present_in_all_return_paths():
+    """agent_hours and arbitrage_score appear on every evaluate_project path."""
+    for res in [
+        evaluate_project("not a dict", {}),
+        evaluate_project({"title": "x", "description": "پرداخت اول"}, {}),
+        evaluate_project({"title": "طراحی لوگو", "description": "گرافیک"}, {}),
+        evaluate_project(
+            {"title": "ربات تلگرام حرفه‌ای", "description": "ربات با aiogram",
+             "budget_max": 800000, "currency": "IRT"}, {},
+        ),
+        evaluate_project(
+            {"title": "ساخت ربات تلگرام ووکامرس", "description": "پایتون و تلگرام",
+             "budget_min": 2500000, "currency": "IRT"}, {},
+        ),
+        evaluate_project(
+            {"title": "ساخت ربات تلگرام ووکامرس", "description": "پایتون و تلگرام",
+             "currency": "IRT"}, {},
+        ),
+    ]:
+        assert "agent_hours" in res
+        assert "arbitrage_score" in res
+
+
 def test_risk_fields_present_in_all_return_paths():
     # Non-dict, no-scope, budget-below-minimum, and scam paths all carry risk fields.
     for res in [

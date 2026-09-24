@@ -32,6 +32,9 @@ _SORT_KEYS: dict[str, str] = {
     "claude_leverage": "claude_leverage",
     "leverage": "claude_leverage",
     "claude": "claude_leverage",
+    "arbitrage": "arbitrage_score",
+    "arbitrage_score": "arbitrage_score",
+    "yield": "arbitrage_score",
 }
 
 _PERSIST_COLUMNS = (
@@ -53,6 +56,8 @@ _PERSIST_COLUMNS = (
     "pricing_strategy",
     "client_risk",
     "red_flags",
+    "arbitrage_score",
+    "scope_shield",
 )
 
 _RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
@@ -200,6 +205,8 @@ class OmniHunterAgentAPI:
             "rejection_reason": project.get("rejection_reason"),
             "estimated_hours": project.get("estimated_hours"),
             "roi_score": project.get("roi_score"),
+            "agent_hours": project.get("agent_hours"),
+            "arbitrage_score": project.get("arbitrage_score"),
             "claude_leverage": project.get("claude_leverage"),
             "win_probability": project.get("win_probability"),
             "difficulty": project.get("difficulty"),
@@ -509,6 +516,19 @@ class OmniHunterAgentAPI:
             return self.db.list_projects(status="shortlisted")
         except Exception:
             return []
+
+    def create_handover_pack(
+        self,
+        job_hash_or_id: str | int,
+        output_dir: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Build the client handover pack for a stored project."""
+        from core.handover import generate_handover_pack
+
+        project = self.db.get_project(job_hash_or_id)
+        if not project:
+            raise ValueError(f"Project '{job_hash_or_id}' not found in database")
+        return generate_handover_pack(project, output_dir=output_dir)
 
     def close(self) -> None:
         """Close the underlying database connection."""

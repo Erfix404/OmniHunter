@@ -433,3 +433,34 @@ def test_proposals_keep_tone_avoidances():
         assert "امیدوارم حالتون خوب باشه" not in proposal
 
 
+def test_scope_shield_returned_in_blueprint():
+    from core.architect import SCOPE_SHIELD_TEXT, generate_scope_shield
+
+    shield = generate_scope_shield()
+    assert shield == SCOPE_SHIELD_TEXT
+    assert "مرزبندی شفاف تعهدات فاز جاری" in shield
+    assert "فاز دوم" in shield
+
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proj = {
+            "title": f"پروژه نمونه {scope}",
+            "description": "توضیحات سناریوی پروژه",
+            "scope": scope,
+            "currency": "IRT",
+        }
+        arch = generate_architecture(proj)
+        assert "scope_shield" in arch
+        assert arch["scope_shield"] == SCOPE_SHIELD_TEXT
+
+
+def test_scope_shield_present_in_proposal_between_workflow_and_risk():
+    proposal = _proposal_for("bots")
+    assert SCOPE_SHIELD_SNIPPET in proposal
+    assert proposal.index("گام سوم") < proposal.index(SCOPE_SHIELD_SNIPPET) < proposal.index(
+        "کاهش ریسک و تضمین پایداری"
+    )
+
+
+SCOPE_SHIELD_SNIPPET = "مرزبندی شفاف تعهدات فاز جاری"
+
+

@@ -451,3 +451,77 @@ def test_client_risk_columns_in_create_table_and_list(tmp_path):
     assert projects[0]["red_flags"] == ["unlimited support"]
 
 
+def test_arbitrage_and_scope_shield_columns(tmp_path):
+    """arbitrage_score and scope_shield persist via save/get and list."""
+    db_file = tmp_path / "test_arbitrage.db"
+    db = DB(str(db_file))
+    db.init_schema()
+
+    cursor = db.conn.execute("PRAGMA table_info(projects)")
+    col_names = {row[1] for row in cursor.fetchall()}
+    assert "arbitrage_score" in col_names
+    assert "scope_shield" in col_names
+
+    project = {
+        "job_hash": "h_arb_1",
+        "title": "Arbitrage Project",
+        "arbitrage_score": 1488095.24,
+        "scope_shield": "مرزبندی شفاف تعهدات فاز جاری",
+    }
+    assert db.save_project(project) is True
+
+    fetched = db.get_project("h_arb_1")
+    assert fetched is not None
+    assert fetched["arbitrage_score"] == 1488095.24
+    assert fetched["scope_shield"] == "مرزبندی شفاف تعهدات فاز جاری"
+
+    listed = db.list_projects()
+    assert listed[0]["arbitrage_score"] == 1488095.24
+    assert listed[0]["scope_shield"] == "مرزبندی شفاف تعهدات فاز جاری"
+
+
+def test_schema_migration_adds_arbitrage_columns(tmp_path):
+    """Pre-existing DBs gain arbitrage_score/scope_shield via init_schema."""
+    import sqlite3
+
+    db_file = tmp_path / "test_migration_arb.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute("""
+        CREATE TABLE projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_hash TEXT UNIQUE NOT NULL,
+            title TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.execute("""
+        CREATE TABLE applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    db = DB(str(db_file))
+    db.init_schema()
+
+    cursor = db.conn.execute("PRAGMA table_info(projects)")
+    col_names = {row[1] for row in cursor.fetchall()}
+    assert "arbitrage_score" in col_names
+    assert "scope_shield" in col_names
+
+    assert db.save_project({
+        "job_hash": "h_arb_mig",
+        "title": "Migrated Arb",
+        "arbitrage_score": 42.5,
+        "scope_shield": "shield text",
+    }) is True
+    fetched = db.get_project("h_arb_mig")
+    assert fetched["arbitrage_score"] == 42.5
+    assert fetched["scope_shield"] == "shield text"
+
+

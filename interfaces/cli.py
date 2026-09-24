@@ -244,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--sort",
         type=str,
         default="roi",
-        choices=["roi", "win_probability", "claude_leverage"],
+        choices=["roi", "win_probability", "claude_leverage", "arbitrage"],
         help="Metric to sort by (default: roi)",
     )
 
@@ -272,6 +272,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Confirm live submission (default fills without submitting)",
+    )
+
+    # handover
+    handover_parser = subparsers.add_parser(
+        "handover", help="Generate client handover & escrow release pack"
+    )
+    handover_parser.add_argument("id", help="Target project ID or job hash")
+    handover_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Custom output directory for the handover pack",
     )
 
     return parser
@@ -694,6 +706,8 @@ def main(argv: list[str] | None = None) -> int:
         run_blueprint(args)
     elif args.command == "fill":
         run_fill(args)
+    elif args.command == "handover":
+        run_handover(args)
     else:
         parser.print_help()
 
@@ -749,6 +763,7 @@ def run_review(
             "roi": "roi_score",
             "win_probability": "win_probability",
             "claude_leverage": "claude_leverage",
+            "arbitrage": "arbitrage_score",
         }
         sort_field = key_map.get(sort_by, "roi_score")
 
@@ -796,6 +811,30 @@ def run_review(
     finally:
         if owns_db and db is not None:
             db.close()
+
+
+def run_handover(
+    args: argparse.Namespace,
+    db: DB | None = None,
+) -> dict[str, Any]:
+    """Generate the client handover & escrow release pack for a project."""
+    api = _get_agent_api(db)
+    try:
+        output_dir = getattr(args, "output_dir", None)
+        job_ref = getattr(args, "id", None) or getattr(args, "job_id", None)
+        res = api.create_handover_pack(job_ref, output_dir=output_dir)
+        print(f"Handover pack created at: {res.get('output_dir')}")
+        print(f"Files: {', '.join(res.get('files', []))}")
+        message = str(res.get("handover_message") or "")
+        preview = message[:300] + ("..." if len(message) > 300 else "")
+        print(f"\n[Delivery Message Preview]\n{preview}")
+        return res
+    finally:
+        if getattr(api, "_owns_db", True):
+            try:
+                api.db.close()
+            except Exception:
+                pass
 
 
 def run_pick(

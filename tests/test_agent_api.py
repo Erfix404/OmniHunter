@@ -512,3 +512,115 @@ def test_skill_files_exist():
     for marker in ("Human-in-the-Loop", "Anti-Clich", "Claude Leverage",
                    "/hunt", "/blueprint", "/fill", "/review"):
         assert marker in root, marker
+
+
+# ----------------------------------------------------------------------
+# Arbitrage Yield Engine: hunt(sort_by="arbitrage") + create_handover_pack
+# ----------------------------------------------------------------------
+
+def test_hunt_sort_by_arbitrage(tmp_path):
+    api = _make_api(tmp_path)
+    try:
+        _patch_scrapers(api, {"ponisha": [BOT_PROJECT], "parscoders": [SCRAPE_PROJECT]})
+        results = api.hunt(limit=10, sort_by="arbitrage")
+        assert len(results) == 2
+        scores = [p.get("arbitrage_score") or 0 for p in results]
+        assert scores == sorted(scores, reverse=True)
+        # Bots project (IRT millions) should out-yield the small USD scrape job.
+        assert results[0]["job_hash"] == BOT_PROJECT["job_hash"]
+        for p in results:
+            assert p.get("agent_hours") is not None
+            assert p.get("arbitrage_score") is not None
+    finally:
+        api.close()
+
+
+def test_create_handover_pack(tmp_path):
+    api = _make_api(tmp_path)
+    try:
+        _patch_scrapers(api, {"ponisha": [BOT_PROJECT]})
+        api.hunt()
+        out = tmp_path / "handover_out"
+        res = api.create_handover_pack(BOT_PROJECT["job_hash"], output_dir=out)
+        assert res["status"] == "success"
+        assert res["output_dir"] == str(out)
+        assert res["files"] == [
+            "راهنمای_ساده_اجرا.md",
+            "run.bat",
+            "run.sh",
+            "پیام_تحویل_نهایی.txt",
+        ]
+        for fname in res["files"]:
+            assert (out / fname).exists()
+        assert len(res["handover_message"]) > 50
+        # Works by integer id too.
+        proj_id = api.db.get_project(BOT_PROJECT["job_hash"])["id"]
+        res2 = api.create_handover_pack(proj_id, output_dir=tmp_path / "handover_out2")
+        assert res2["status"] == "success"
+    finally:
+        api.close()
+
+
+def test_create_handover_pack_missing_project(tmp_path):
+    api = _make_api(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="not found"):
+            api.create_handover_pack("ghost-hash")
+    finally:
+        api.close()
+
+
+def test_cli_handover_parsing_and_dispatch(tmp_path, capsys):
+    from interfaces.cli import build_parser, main, run_handover
+
+    parser = build_parser()
+    args = parser.parse_args(["handover", "42"])
+    assert args.command == "handover"
+    assert args.id == "42"
+    assert args.output_dir is None
+
+    args2 = parser.parse_args(["handover", "abc", "--output-dir", "out/dir"])
+    assert args2.output_dir == "out/dir"
+
+    with patch("interfaces.cli.run_handover") as m:
+        assert main(["handover", "1"]) == 0
+        m.assert_called_once()
+
+    # run_handover end-to-end against a temp DB.
+    from argparse import Namespace
+
+    from core.db import DB
+
+    db = DB(str(tmp_path / "cli_handover.db"))
+    db.init_schema()
+    db.save_project({**BOT_PROJECT, "tier": "A", "status": "new", "scope": "bots"})
+    res = run_handover(
+        Namespace(id=BOT_PROJECT["job_hash"], output_dir=str(tmp_path / "hpack")),
+        db=db,
+    )
+    assert res["status"] == "success"
+    out = capsys.readouterr().out
+    assert "Handover pack created" in out
+    assert "Delivery Message Preview" in out
+
+
+def test_cli_review_supports_arbitrage_sort(tmp_path):
+    from argparse import Namespace
+
+    from core.db import DB
+    from interfaces.cli import build_parser, run_review
+
+    parser = build_parser()
+    args = parser.parse_args(["review", "--sort", "arbitrage"])
+    assert args.sort == "arbitrage"
+
+    db = DB(str(tmp_path / "cli_arb.db"))
+    db.init_schema()
+    db.save_project({**BOT_PROJECT, "tier": "A", "roi_score": 1.0,
+                     "arbitrage_score": 999.0, "fit_score": 0.9,
+                     "status": "new", "scope": "bots"})
+    db.save_project({**SCRAPE_PROJECT, "tier": "B", "roi_score": 999999.0,
+                     "arbitrage_score": 1.0, "fit_score": 0.6,
+                     "status": "new", "scope": "scraping"})
+    reviewed = run_review(Namespace(limit=10, shortlisted=False, sort="arbitrage"), db=db)
+    assert reviewed[0]["job_hash"] == BOT_PROJECT["job_hash"]

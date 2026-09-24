@@ -38,6 +38,8 @@ class DB:
         "clarifying_question",
         "client_risk",
         "red_flags",
+        "arbitrage_score",
+        "scope_shield",
     }
 
     APPLICATION_COLUMNS = {
@@ -94,6 +96,8 @@ class DB:
                 clarifying_question TEXT,
                 client_risk TEXT,
                 red_flags TEXT,
+                arbitrage_score REAL,
+                scope_shield TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -128,6 +132,8 @@ class DB:
             "clarifying_question": "TEXT",
             "client_risk": "TEXT",
             "red_flags": "TEXT",
+            "arbitrage_score": "REAL",
+            "scope_shield": "TEXT",
         }
         cursor = self.conn.execute("PRAGMA table_info(projects)")
         existing_cols = {row[1] for row in cursor.fetchall()}
