@@ -9,6 +9,7 @@ from typing import Any
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.persian_text import humanize_persian
 from core.triage import evaluate_project, normalize_text
 
 # ponytail: rule-based template generation over dynamic LLM calls; upgrade to Claude Haiku/Sonnet generator when customized client tone is needed.
@@ -104,7 +105,7 @@ SCOPE_SHIELD_TEXT = (
 
 def generate_scope_shield() -> str:
     """Return the Scope Shield paragraph for proposals and blueprints."""
-    return SCOPE_SHIELD_TEXT
+    return humanize_persian(SCOPE_SHIELD_TEXT)
 # Scope-specific technical hooks (direct, no clichés)
 DEFAULT_TECHNICAL_HOOKS: dict[str, str] = {
     "bots": "معماری ربات بر پایه aiogram 3.x با FSM و مدیریت نشست‌ها طراحی می‌شود تا پایداری و مقیاس‌پذیری در بار بالا تضمین گردد.",
@@ -433,7 +434,9 @@ def _build_rule_based_proposal(
         "کاهش ریسک و تضمین پایداری:\n"
         "تعهد می‌دهم پیش از تحویل، تست کامل سناریوهای اصلی و حالت‌های مرزی را انجام دهم، "
         "مستندات شفاف نحوه اجرا و استفاده از سیستم را تحویل دهم "
-        "و پشتیبانی اولیه برای رفع اشکال را بدون هزینه اضافه انجام دهم تا با خیال راحت تصمیم بگیرید.\n\n"
+        "و پشتیبانی اولیه برای رفع اشکال را بدون هزینه اضافه انجام دهم تا با خیال راحت تصمیم بگیرید. "
+        "تجربه نشان داده بسیاری از پروژه‌ها دقیقاً در همین مرحله دچار افت کیفیت می‌شوند؛ "
+        "به همین دلیل خروجی هر گام پیش از ادامه بررسی و تست می‌شود.\n\n"
         "اگر این چارچوب کلی مدنظر شماست، خوشحال می‌شم در چت گفتگو کنیم تا ساختار خروجی و زمان‌بندی رو دقیق‌تر هماهنگ کنیم.\n"
         f"زمان تحویل: {delivery_days} روز کاری."
     )
@@ -691,7 +694,17 @@ def generate_architecture(
                 project, scope, tech_stack, roadmap, delivery_days
             )
 
-    technical_hook = DEFAULT_TECHNICAL_HOOKS.get(scope, DEFAULT_TECHNICAL_HOOKS["scripting"])
+    technical_hook = humanize_persian(
+        DEFAULT_TECHNICAL_HOOKS.get(scope, DEFAULT_TECHNICAL_HOOKS["scripting"])
+    )
+    scope_shield = humanize_persian(SCOPE_SHIELD_TEXT)
+    clarifying_question = humanize_persian(
+        DEFAULT_CLARIFYING_QUESTIONS.get(scope, DEFAULT_CLARIFYING_QUESTIONS["scripting"])
+    )
+    prerequisites = [
+        humanize_persian(p)
+        for p in DEFAULT_PREREQUISITES.get(scope, DEFAULT_PREREQUISITES["scripting"])
+    ]
 
     if prof is not None:
         proposal = _inject_profile_evidence(proposal, scope, prof)
@@ -708,16 +721,18 @@ def generate_architecture(
             suggested_bid, scope, currency, tech_stack, prof
         )
 
+    proposal = humanize_persian(proposal)
+
     return {
         "suggested_bid": suggested_bid,
         "delivery_days": delivery_days,
         "tech_stack": tech_stack,
         "roadmap": roadmap,
         "proposal": proposal,
-        "scope_shield": SCOPE_SHIELD_TEXT,
+        "scope_shield": scope_shield,
         "technical_hook": technical_hook,
-        "prerequisites": list(DEFAULT_PREREQUISITES.get(scope, DEFAULT_PREREQUISITES["scripting"])),
-        "clarifying_question": DEFAULT_CLARIFYING_QUESTIONS.get(scope, DEFAULT_CLARIFYING_QUESTIONS["scripting"]),
+        "prerequisites": prerequisites,
+        "clarifying_question": clarifying_question,
     }
 
 

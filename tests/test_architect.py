@@ -464,3 +464,44 @@ def test_scope_shield_present_in_proposal_between_workflow_and_risk():
 SCOPE_SHIELD_SNIPPET = "مرزبندی شفاف تعهدات فاز جاری"
 
 
+def test_architect_proposals_persian_writing_hygiene():
+    """Proposals are de-AIed, ZWNJ-correct, and use Persian punctuation."""
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proposal = _proposal_for(scope)
+        assert "می‌باشد" not in proposal, f"AI tell می‌باشد in {scope}"
+        assert "میباشد" not in proposal, f"AI tell میباشد in {scope}"
+        assert "می‌گردد" not in proposal, f"AI tell می‌گردد in {scope}"
+        assert "میگردد" not in proposal, f"AI tell میگردد in {scope}"
+        assert "می شود" not in proposal, f"Broken verb spacing in {scope}"
+        assert "،" in proposal, f"Missing Persian comma in {scope}"
+        assert "‌" in proposal, f"Missing ZWNJ in {scope}"
+        # No Arabic glyph contamination.
+        assert "ي" not in proposal, f"Arabic ي in {scope}"
+        assert "ك" not in proposal, f"Arabic ك in {scope}"
+    # Pipeline proof: broken input comes out with proper ZWNJ forms.
+    from core.persian_text import humanize_persian as _hz
+
+    assert "می‌شود" in _hz("می شود")
+    assert "پروژه‌ها" in _hz("پروژه ها")
+
+
+def test_architect_fields_persian_writing_hygiene():
+    """technical_hook, scope_shield, clarifying_question, prerequisites are humanized."""
+    for scope in ["bots", "automation", "translation", "excel", "scraping", "scripting"]:
+        proj = {
+            "title": f"پروژه نمونه {scope}",
+            "description": "توضیحات سناریوی پروژه",
+            "scope": scope,
+            "currency": "IRT",
+        }
+        from core.architect import generate_architecture as _gen
+
+        arch = _gen(proj)
+        for field in ("technical_hook", "scope_shield", "clarifying_question"):
+            assert "می‌باشد" not in arch[field], f"AI tell in {field} ({scope})"
+            assert "می‌گردد" not in arch[field], f"AI tell in {field} ({scope})"
+        for item in arch["prerequisites"]:
+            assert "می‌باشد" not in item, f"AI tell in prerequisites ({scope})"
+            assert "ي" not in item, f"Arabic ي in prerequisites ({scope})"
+
+
